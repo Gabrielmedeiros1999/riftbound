@@ -1005,7 +1005,8 @@ private createHitEffect(
 
   private updateHUD() {
     this.hudText.setText(
-      `ONDA ${this.wave}     NÍVEL ${this.level}     XP ${this.xp}/${this.xpToNextLevel}`
+      `ONDA ${this.wave}     NÍVEL ${this.level}     XP ${this.xp}/${this.xpToNextLevel}\n` +
+      `INIMIGOS RESTANTES: ${this.enemiesRemainingInWave}`
     );
 
     const width = this.scale.width;
@@ -1087,6 +1088,16 @@ private takeDamage() {
     0,
     this.playerHealth - this.contactDamage,
   );
+
+  this.player
+    .setTint(0xffffff)
+    .setTintMode(Phaser.TintModes.FILL);
+    
+this.time.delayedCall(100, () => {
+  if (this.player && this.player.active) {
+    this.player.clearTint();
+  }
+});
 
   this.updateHUD();
 
