@@ -56,8 +56,6 @@ export class ArenaScene extends Phaser.Scene {
   private xpToNextLevel = 3;
   private playerDamage = 1;
 
-  private progressionText!: Phaser.GameObjects.Text;
-
   // Esquiva
   private dodgeUntil = 0;
   private invulnerableUntil = 0;
@@ -93,8 +91,10 @@ export class ArenaScene extends Phaser.Scene {
   private playerHealth = 100;
   private playerMaxHealth = 100;
 
+  // HUD
+  private hudText!: Phaser.GameObjects.Text;
   private healthBar!: Phaser.GameObjects.Graphics;
-  private healthText!: Phaser.GameObjects.Text;
+  private xpBar!: Phaser.GameObjects.Graphics;
 
   private gameOver = false;
 
@@ -178,8 +178,7 @@ export class ArenaScene extends Phaser.Scene {
     this.createHeroAnimations();
     this.createPlayer();
     this.createEnemy();
-    this.createHealthUI();
-    this.createProgressionUI();
+    this.createHUD();
 
     this.input.keyboard!.removeAllKeys(true);
 
@@ -191,15 +190,6 @@ export class ArenaScene extends Phaser.Scene {
       attack: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J),
       dodge: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
     };
-
-
-    this.add
-      .text(16, 16, "RIFTBOUND // PROTOTIPO", {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: "#c4b5fd",
-      })
-      .setScrollFactor(0);
   }
 
 private playSfx(key: string, volume = 0.5) {
@@ -237,7 +227,7 @@ private gainXP(amount: number) {
     this.playSfx("level-up", 0.65);
   }
 
-  this.updateProgressionUI();
+  this.updateHUD();
 
   if (this.pendingLevelUps > 0 && !this.upgradePending) {
     this.showUpgradeSelection();
@@ -421,7 +411,7 @@ private chooseUpgrade(index: number) {
       this.playerMaxHealth,
       this.playerHealth + 20
     );
-    this.updateHealthUI();
+    this.updateHUD();
   }
 
   this.upgradeObjects.forEach((object) => object.destroy());
@@ -430,7 +420,7 @@ private chooseUpgrade(index: number) {
   this.pendingLevelUps -= 1;
   this.upgradePending = false;
 
-  this.updateProgressionUI();
+  this.updateHUD();
 
   if (this.pendingLevelUps > 0) {
     this.showUpgradeSelection();
@@ -634,7 +624,7 @@ if (this.enemyType === "runner") {
 
   this.gainXP(1);
   this.enemiesRemainingInWave -= 1;
-  this.updateProgressionUI();
+  this.updateHUD();
 
   this.time.delayedCall(800, () => {
     if (this.gameOver) return;
@@ -651,7 +641,7 @@ if (this.enemyType === "runner") {
     this.enemiesRemainingInWave = 3 + (this.wave - 1);
     
 
-    this.updateProgressionUI();
+    this.updateHUD();
     this.spawnEnemy();
   });
 }
@@ -978,64 +968,90 @@ private createHitEffect(
     });
   }
 
-  private createHealthUI() {
-  this.healthText = this.add
-    .text(16, 42, "VIDA: 100 / 100", {
-      fontFamily: "monospace",
-      fontSize: "14px",
-      color: "#f8fafc",
-    })
-    .setScrollFactor(0)
-    .setDepth(10000);
+  private createHUD() {
+    const width = this.scale.width;
 
-  this.healthBar = this.add.graphics();
-  this.healthBar
-    .setScrollFactor(0)
-    .setDepth(10000);
+    // Painel superior
+    const panel = this.add.graphics();
+    panel.fillStyle(0x0b0812, 0.9);
+    panel.fillRoundedRect(16, 16, width - 32, 92, 12);
+    panel.lineStyle(1, 0x6d28d9, 0.8);
+    panel.strokeRoundedRect(16, 16, width - 32, 92, 12);
+    panel.setScrollFactor(0);
+    panel.setDepth(10000);
 
-  this.updateHealthUI();
-}
+    this.hudText = this.add
+      .text(30, 25, "", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#e9d5ff",
+        fontStyle: "bold",
+      })
+      .setScrollFactor(0)
+      .setDepth(10001);
 
-private updateHealthUI() {
-    const barX = 16;
-    const barY = 64;
-    const barWidth = 200;
-    const barHeight = 12;
+    this.healthBar = this.add
+      .graphics()
+      .setScrollFactor(0)
+      .setDepth(10001);
 
-    const ratio = Phaser.Math.Clamp(
-      this.playerHealth / this.playerMaxHealth,
-      0,
-      1,
+    this.xpBar = this.add
+      .graphics()
+      .setScrollFactor(0)
+      .setDepth(10001);
+
+    this.updateHUD();
+  }
+
+  private updateHUD() {
+    this.hudText.setText(
+      `ONDA ${this.wave}     NÍVEL ${this.level}     XP ${this.xp}/${this.xpToNextLevel}`
     );
 
+    const width = this.scale.width;
+    const barWidth = Math.min(width - 60, 320);
+    const barHeight = 12;
+    const barX = 30;
+
+    // Barra de vida
     this.healthBar.clear();
 
-    // Fundo da barra.
-    this.healthBar.fillStyle(0x450a0a, 1);
-    this.healthBar.fillRect(
-      barX,
-      barY,
-      barWidth,
-      barHeight,
+    this.healthBar.fillStyle(0x374151, 1);
+    this.healthBar.fillRoundedRect(
+      barX, 53, barWidth, barHeight, 5
     );
 
-    // Vida atual.
+    const healthRatio = Phaser.Math.Clamp(
+      this.playerHealth / this.playerMaxHealth, 0, 1
+    );
+
     this.healthBar.fillStyle(
-      ratio > 0.3 ? 0x22c55e : 0xef4444,
-      1,
+      healthRatio > 0.5 ? 0x22c55e :
+      healthRatio > 0.25 ? 0xeab308 : 0xef4444,
+      1
     );
 
-    this.healthBar.fillRect(
-      barX,
-      barY,
-      barWidth * ratio,
-      barHeight,
+    this.healthBar.fillRoundedRect(
+      barX, 53, barWidth * healthRatio, barHeight, 5
     );
 
-    this.healthText.setText(
-      `VIDA: ${this.playerHealth} / ${this.playerMaxHealth}`,
+    // Barra de experiência
+    this.xpBar.clear();
+
+    this.xpBar.fillStyle(0x374151, 1);
+    this.xpBar.fillRoundedRect(
+      barX, 78, barWidth, 8, 4
     );
- }
+
+    const xpRatio = Phaser.Math.Clamp(
+      this.xp / this.xpToNextLevel, 0, 1
+    );
+
+    this.xpBar.fillStyle(0xa855f7, 1);
+    this.xpBar.fillRoundedRect(
+      barX, 78, barWidth * xpRatio, 8, 4
+    );
+  }
 
 private takeDamage() {
   if (this.gameOver || !this.enemyAlive) {
@@ -1072,7 +1088,7 @@ private takeDamage() {
     this.playerHealth - this.contactDamage,
   );
 
-  this.updateHealthUI();
+  this.updateHUD();
 
   // Efeito visual ao receber dano.
   this.player.setAlpha(0.35);
@@ -1094,32 +1110,6 @@ private takeDamage() {
   }
 }
 
-private createProgressionUI() {
-  this.progressionText = this.add
-    .text(16, 88, "", {
-      fontFamily: "monospace",
-      fontSize: "13px",
-      color: "#c4b5fd",
-      lineSpacing: 5,
-    })
-    .setScrollFactor(0)
-    .setDepth(10000);
-
-  this.updateProgressionUI();
-}
-
-private updateProgressionUI() {
-  this.progressionText.setText(
-    [
-      `ONDA: ${this.wave}`,
-      `INIMIGOS RESTANTES: ${this.enemiesRemainingInWave}`,
-      `NÍVEL: ${this.level}`,
-      `XP: ${this.xp} / ${this.xpToNextLevel}`,
-      `DANO: ${this.playerDamage}`,
-    ].join("\n"),
-  );
-}
-
   update(_time: number, delta: number) {
 
     if (this.gameOver) {
@@ -1129,6 +1119,8 @@ private updateProgressionUI() {
     if (this.upgradePending) {
       return;
     }
+
+    this.updateHUD();
 
     let dx = 0;
     let dy = 0;
