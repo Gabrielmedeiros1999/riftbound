@@ -958,6 +958,11 @@ private createHitEffect(
 
     slash.strokePath();
     this.damageEnemy();
+    this.showDamageNumber(
+  this.enemy.x,
+  this.enemy.y,
+  this.playerDamage,
+);
     slash.setDepth(position.y + 1);
 
     slash.setDepth(1000);
@@ -1002,6 +1007,40 @@ private createHitEffect(
 
     this.updateHUD();
   }
+
+private showDamageNumber(
+  x: number,
+  y: number,
+  damage: number,
+  isCritical = false,
+) {
+  const text = this.add.text(
+    x + Phaser.Math.Between(-8, 8),
+    y - 28,
+    `-${damage}`,
+    {
+      fontFamily: "monospace",
+      fontSize: isCritical ? "22px" : "16px",
+      fontStyle: "bold",
+      color: isCritical ? "#fbbf24" : "#ffffff",
+      stroke: "#1f102e",
+      strokeThickness: 4,
+    },
+  );
+
+  text.setOrigin(0.5);
+  text.setDepth(10000);
+
+  this.tweens.add({
+    targets: text,
+    y: text.y - 35,
+    alpha: 0,
+    scale: isCritical ? 1.3 : 1,
+    duration: 650,
+    ease: "Cubic.easeOut",
+    onComplete: () => text.destroy(),
+  });
+}
 
   private updateHUD() {
     this.hudText.setText(
@@ -1089,10 +1128,12 @@ private takeDamage() {
     this.playerHealth - this.contactDamage,
   );
 
+
+  // efeito de dano no jogador
   this.player
     .setTint(0xffffff)
     .setTintMode(Phaser.TintModes.FILL);
-    
+
 this.time.delayedCall(100, () => {
   if (this.player && this.player.active) {
     this.player.clearTint();
