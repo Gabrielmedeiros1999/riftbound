@@ -318,6 +318,49 @@ private createRiftDecorations() {
   }
 }
 
+
+private createEnemyDeathEffect(x: number, y: number, color: number) {
+  // Explosão central
+  const flash = this.add.circle(x, y - 15, 8, color, 0.9);
+  flash.setDepth(10000);
+
+  this.tweens.add({
+    targets: flash,
+    radius: 30,
+    alpha: 0,
+    duration: 250,
+    ease: "Cubic.easeOut",
+    onComplete: () => flash.destroy(),
+  });
+
+  // Partículas que se espalham
+  for (let i = 0; i < 8; i++) {
+    const angle = (Math.PI * 2 * i) / 8;
+    const distance = Phaser.Math.Between(15, 35);
+
+    const particle = this.add.circle(
+      x,
+      y - 15,
+      Phaser.Math.Between(2, 4),
+      color,
+    );
+
+    particle.setDepth(10000);
+
+    this.tweens.add({
+      targets: particle,
+      x: x + Math.cos(angle) * distance,
+      y: y - 15 + Math.sin(angle) * distance,
+      alpha: 0,
+      scale: 0.2,
+      duration: 300,
+      ease: "Cubic.easeOut",
+      onComplete: () => particle.destroy(),
+    });
+  }
+}
+
+
 private showUpgradeSelection() {
   this.upgradePending = true;
   this.upgradeObjects = [];
@@ -615,6 +658,19 @@ if (this.enemyType === "runner") {
 
  private handleEnemyDefeated() {
   this.enemyAlive = false;
+
+  const enemyColor =
+    this.enemyType === "runner"
+      ? 0xf97316
+      : this.enemyType === "brute"
+        ? 0xa855f7
+        : 0xef4444;
+        
+  this.createEnemyDeathEffect(
+  this.enemy.x,
+  this.enemy.y,
+  enemyColor,
+  );
   this.createHitEffect(
   this.enemyX,
   this.enemyY,
@@ -742,6 +798,12 @@ if (this.enemyType === "runner") {
 
   this.enemyHealth -= this.playerDamage;
   this.playSfx("hit", 0.6);
+
+     this.showDamageNumber(
+        this.enemy.x,
+        this.enemy.y,
+        this.playerDamage,
+      );
 
   this.createHitEffect(
     this.enemyX,
@@ -958,11 +1020,6 @@ private createHitEffect(
 
     slash.strokePath();
     this.damageEnemy();
-    this.showDamageNumber(
-  this.enemy.x,
-  this.enemy.y,
-  this.playerDamage,
-);
     slash.setDepth(position.y + 1);
 
     slash.setDepth(1000);
@@ -1017,7 +1074,7 @@ private showDamageNumber(
   const text = this.add.text(
     x + Phaser.Math.Between(-8, 8),
     y - 28,
-    `-${damage}`,
+    `${damage}`,
     {
       fontFamily: "monospace",
       fontSize: isCritical ? "22px" : "16px",
