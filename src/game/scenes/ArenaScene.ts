@@ -11,6 +11,8 @@ export class ArenaScene extends Phaser.Scene {
     dodge: Phaser.Input.Keyboard.Key;
   };
 
+  private escKey!: Phaser.Input.Keyboard.Key;
+
   // Posição lógica do personagem na arena.
   private worldX = 6;
   private worldY = 6;
@@ -190,6 +192,17 @@ export class ArenaScene extends Phaser.Scene {
       attack: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J),
       dodge: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
     };
+
+    this.escKey = this.input.keyboard!.addKey(
+      Phaser.Input.Keyboard.KeyCodes.ESC,
+    );
+
+    this.escKey.on("down", () => {
+      if (this.scene.isActive("ArenaScene")) {
+        this.scene.pause("ArenaScene");
+        this.scene.launch("PauseScene");
+      }
+    });
   }
 
 private playSfx(key: string, volume = 0.5) {

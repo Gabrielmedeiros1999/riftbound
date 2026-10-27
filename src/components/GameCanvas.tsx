@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import { ArenaScene } from "../game/scenes/ArenaScene";
 import { MenuScene } from "../game/scenes/MenuScene";
 import { EndScene } from "../game/scenes/EndScene";
+import { PauseScene } from "../game/scenes/PauseScene";
 
 
 export function GameCanvas() {
@@ -21,7 +22,7 @@ export function GameCanvas() {
       backgroundColor: "#0f172a",
       pixelArt: true,
       antialias: false,
-      scene: [MenuScene, ArenaScene, EndScene],
+      scene: [MenuScene, ArenaScene, EndScene, PauseScene],
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
