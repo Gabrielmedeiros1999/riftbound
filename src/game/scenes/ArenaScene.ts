@@ -219,12 +219,19 @@ private playHeroAnimation(action: "idle" | "walk" | "attack") {
 private gainXP(amount: number) {
   this.xp += amount;
 
+   let leveledUp = false;
+
   while (this.xp >= this.xpToNextLevel) {
     this.xp -= this.xpToNextLevel;
     this.level += 1;
     this.xpToNextLevel += 2;
     this.pendingLevelUps += 1;
     this.playSfx("level-up", 0.65);
+    leveledUp = true;
+  }
+
+   if (leveledUp) {
+    this.createLevelUpEffect();
   }
 
   this.updateHUD();
@@ -1149,6 +1156,53 @@ private showDamageNumber(
       barX, 78, barWidth * xpRatio, 8, 4
     );
   }
+
+  
+private createLevelUpEffect() {
+  const x = this.player.x;
+  const y = this.player.y - 35;
+
+  // Círculo de energia ao redor do jogador
+  const ring = this.add.circle(x, y, 12, 0xa855f7, 0.15);
+  ring.setStrokeStyle(3, 0xc4b5fd, 1);
+  ring.setDepth(10000);
+
+  this.tweens.add({
+    targets: ring,
+    radius: 65,
+    alpha: 0,
+    duration: 450,
+    ease: "Cubic.easeOut",
+    onComplete: () => ring.destroy(),
+  });
+
+  // Partículas de energia subindo
+  for (let i = 0; i < 14; i++) {
+    const particle = this.add.circle(
+      x + Phaser.Math.Between(-22, 22),
+      y + Phaser.Math.Between(-10, 10),
+      Phaser.Math.Between(2, 4),
+      i % 2 === 0 ? 0xc4b5fd : 0xa855f7,
+    );
+
+    particle.setDepth(10000);
+
+    this.tweens.add({
+      targets: particle,
+      x: particle.x + Phaser.Math.Between(-45, 45),
+      y: particle.y - Phaser.Math.Between(35, 75),
+      alpha: 0,
+      scale: 0.2,
+      duration: Phaser.Math.Between(350, 600),
+      ease: "Cubic.easeOut",
+      onComplete: () => particle.destroy(),
+    });
+  }
+
+  // Pequeno destaque visual da câmera
+  this.cameras.main.flash(150, 100, 50, 180, false);
+}
+
 
 private takeDamage() {
   if (this.gameOver || !this.enemyAlive) {
