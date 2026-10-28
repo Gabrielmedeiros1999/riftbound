@@ -206,9 +206,15 @@ export class ArenaScene extends Phaser.Scene {
   }
 
 private playSfx(key: string, volume = 0.5) {
-  if (!this.cache.audio.exists(key)) return;
+  if (!this.cache.audio.exists(key)) {
+    return;
+  }
 
-  this.sound.play(key, { volume });
+  const globalVolume = this.registry.get("sfxVolume") ?? 0.5;
+
+  this.sound.play(key, {
+    volume: volume * globalVolume,
+  });
 }
 
   private projectPosition(x: number, y: number) {
