@@ -1,109 +1,115 @@
-
 import Phaser from "phaser";
+
+type MusicSound =
+  | Phaser.Sound.WebAudioSound
+  | Phaser.Sound.HTML5AudioSound;
 
 export class PauseScene extends Phaser.Scene {
   private volumeText!: Phaser.GameObjects.Text;
+  private musicVolumeText!: Phaser.GameObjects.Text;
   private sfxVolume = 0.5;
-  
+  private musicVolume = 0.25;
+
   constructor() {
     super("PauseScene");
   }
 
- create() {
-  const { width, height } = this.scale;
+  create() {
+    const { width, height } = this.scale;
 
-  // Fundo escurecido, mantendo a arena visível
-  this.add.rectangle(
-    width / 2,
-    height / 2,
-    width,
-    height,
-    0x080510,
-    0.82,
-  ).setScrollFactor(0).setDepth(1000);
+    // Fundo escurecido, mantendo a arena visível
+    this.add
+      .rectangle(width / 2, height / 2, width, height, 0x080510, 0.82)
+      .setScrollFactor(0)
+      .setDepth(1000);
 
-  this.add.text(width / 2, height * 0.20, "PAUSADO", {
-    fontFamily: "monospace",
-    fontSize: "38px",
-    fontStyle: "bold",
-    color: "#c4b5fd",
-  }).setOrigin(0.5).setDepth(1001);
+    this.add
+      .text(width / 2, height * 0.17, "PAUSADO", {
+        fontFamily: "monospace",
+        fontSize: "38px",
+        fontStyle: "bold",
+        color: "#c4b5fd",
+      })
+      .setOrigin(0.5)
+      .setDepth(1001);
 
-  this.add.text(width / 2, height * 0.28,
-    "A arena aguarda seu retorno.", {
-      fontFamily: "monospace",
-      fontSize: "13px",
-      color: "#d1d5db",
-    }).setOrigin(0.5).setDepth(1001);
+    this.add
+      .text(width / 2, height * 0.25, "A arena aguarda seu retorno.", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#d1d5db",
+      })
+      .setOrigin(0.5)
+      .setDepth(1001);
 
-  // ---- Bloco de volume: texto no centro, [ - ] e [ + ] nas laterais ----
-  this.sfxVolume = this.registry.get("sfxVolume") ?? 0.5;
+    // ---- Volume dos efeitos ----
+    this.sfxVolume = this.registry.get("sfxVolume") ?? 0.5;
+    const sfxY = height * 0.37;
 
-  const volumeY = height * 0.40;
+    this.volumeText = this.add
+      .text(width / 2, sfxY, "", {
+        fontFamily: "monospace",
+        fontSize: "15px",
+        color: "#e9d5ff",
+      })
+      .setOrigin(0.5)
+      .setDepth(1001);
 
-  this.volumeText = this.add.text(width / 2, volumeY, "", {
-    fontFamily: "monospace",
-    fontSize: "15px",
-    color: "#e9d5ff",
-  }).setOrigin(0.5).setDepth(1001);
+    this.updateVolumeText();
 
-  this.updateVolumeText();
+    this.createButton(width / 2 - 190, sfxY, "[ - ]", () =>
+      this.changeVolume(-0.1),
+    );
+    this.createButton(width / 2 + 190, sfxY, "[ + ]", () =>
+      this.changeVolume(0.1),
+    );
 
-  this.createButton(
-    width / 2 - 190,
-    volumeY,
-    "[ - ]",
-    () => this.changeVolume(-0.1),
-  );
+    // ---- Volume da música ----
+    this.musicVolume = this.registry.get("musicVolume") ?? 0.25;
+    const musicY = height * 0.46;
 
-  this.createButton(
-    width / 2 + 190,
-    volumeY,
-    "[ + ]",
-    () => this.changeVolume(0.1),
-  );
+    this.musicVolumeText = this.add
+      .text(width / 2, musicY, "", {
+        fontFamily: "monospace",
+        fontSize: "15px",
+        color: "#e9d5ff",
+      })
+      .setOrigin(0.5)
+      .setDepth(1001);
 
-  // ---- Botões principais ----
-  this.createButton(
-    width / 2,
-    height * 0.54,
-    "[ CONTINUAR ]",
-    () => {
+    this.updateMusicVolumeText();
+
+    this.createButton(width / 2 - 190, musicY, "[ - ]", () =>
+      this.changeMusicVolume(-0.1),
+    );
+    this.createButton(width / 2 + 190, musicY, "[ + ]", () =>
+      this.changeMusicVolume(0.1),
+    );
+
+    // ---- Botões principais ----
+    this.createButton(width / 2, height * 0.59, "[ CONTINUAR ]", () => {
       this.scene.stop("PauseScene");
       this.scene.resume("ArenaScene");
-    },
-  );
+    });
 
-  this.createButton(
-    width / 2,
-    height * 0.65,
-    "[ REINICIAR ]",
-    () => {
+    this.createButton(width / 2, height * 0.7, "[ REINICIAR ]", () => {
       this.scene.stop("PauseScene");
       this.scene.stop("ArenaScene");
       this.scene.start("ArenaScene");
-    },
-  );
+    });
 
-  this.createButton(
-    width / 2,
-    height * 0.76,
-    "[ VOLTAR AO MENU ]",
-    () => {
+    this.createButton(width / 2, height * 0.81, "[ VOLTAR AO MENU ]", () => {
       this.scene.stop("PauseScene");
       this.scene.stop("ArenaScene");
       this.scene.start("MenuScene");
-    },
-  );
+    });
 
-  // ESC também retoma a partida
-  this.input.keyboard?.once("keydown-ESC", () => {
-    this.scene.stop("PauseScene");
-    this.scene.resume("ArenaScene");
-  });
-}
-
- 
+    // ESC também retoma a partida
+    this.input.keyboard?.once("keydown-ESC", () => {
+      this.scene.stop("PauseScene");
+      this.scene.resume("ArenaScene");
+    });
+  }
 
   private createButton(
     x: number,
@@ -111,13 +117,14 @@ export class PauseScene extends Phaser.Scene {
     label: string,
     onClick: () => void,
   ) {
-    const button = this.add.text(x, y, label, {
-      fontFamily: "monospace",
-      fontSize: "17px",
-      color: "#ffffff",
-      backgroundColor: "#5b21b6",
-      padding: { x: 20, y: 12 },
-    })
+    const button = this.add
+      .text(x, y, label, {
+        fontFamily: "monospace",
+        fontSize: "17px",
+        color: "#ffffff",
+        backgroundColor: "#5b21b6",
+        padding: { x: 20, y: 12 },
+      })
       .setOrigin(0.5)
       .setDepth(1001)
       .setInteractive({ useHandCursor: true });
@@ -133,21 +140,48 @@ export class PauseScene extends Phaser.Scene {
     button.on("pointerdown", onClick);
   }
 
-   private changeVolume(amount: number) {
-  this.sfxVolume = Phaser.Math.Clamp(
-    Math.round((this.sfxVolume + amount) * 10) / 10,
-    0,
-    1,
-  );
+  // ---- Efeitos ----
+  private changeVolume(amount: number) {
+    this.sfxVolume = Phaser.Math.Clamp(
+      Math.round((this.sfxVolume + amount) * 10) / 10,
+      0,
+      1,
+    );
 
     this.registry.set("sfxVolume", this.sfxVolume);
     this.updateVolumeText();
-
   }
 
   private updateVolumeText() {
     this.volumeText.setText(
       `VOLUME DOS EFEITOS: ${Math.round(this.sfxVolume * 100)}%`,
+    );
+  }
+
+  // ---- Música ----
+  private changeMusicVolume(amount: number) {
+    this.musicVolume = Phaser.Math.Clamp(
+      Math.round((this.musicVolume + amount) * 10) / 10,
+      0,
+      1,
+    );
+
+    this.registry.set("musicVolume", this.musicVolume);
+
+    const music = this.registry.get("backgroundMusicSound") as
+      | MusicSound
+      | undefined;
+
+    if (music) {
+      music.setVolume(this.musicVolume);
+    }
+
+    this.updateMusicVolumeText();
+  }
+
+  private updateMusicVolumeText() {
+    this.musicVolumeText.setText(
+      `VOLUME DA MÚSICA: ${Math.round(this.musicVolume * 100)}%`,
     );
   }
 }

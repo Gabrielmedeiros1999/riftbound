@@ -104,6 +104,9 @@ export class ArenaScene extends Phaser.Scene {
   private readonly contactDamage = 10;
   private readonly damageCooldown = 800;
 
+
+  private backgroundMusic!: Phaser.Sound.BaseSound;
+
   constructor() {
     super("ArenaScene");
   }
@@ -171,6 +174,10 @@ export class ArenaScene extends Phaser.Scene {
       frameHeight: 82,
     }
   );
+  this.load.audio(
+    "background-music",
+    "assets/audio/music.mp3",
+  );
  }
 
   create() {
@@ -181,6 +188,23 @@ export class ArenaScene extends Phaser.Scene {
     this.createPlayer();
     this.createEnemy();
     this.createHUD();
+
+    const musicVolume = this.registry.get("musicVolume") ?? 0.25;
+
+    this.backgroundMusic = this.sound.add("background-music", {
+      loop: true,
+      volume: musicVolume,
+    });
+
+    this.backgroundMusic.play();
+
+    this.registry.set("backgroundMusicSound", this.backgroundMusic);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.backgroundMusic.stop();
+      this.backgroundMusic.destroy();
+      this.registry.remove("backgroundMusicSound");
+    });
 
     this.input.keyboard!.removeAllKeys(true);
 
