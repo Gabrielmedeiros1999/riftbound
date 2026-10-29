@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { loadSettings, saveSettings } from "../utils/settings";
 
 type MusicSound =
   | Phaser.Sound.WebAudioSound
@@ -43,7 +44,9 @@ export class PauseScene extends Phaser.Scene {
       .setDepth(1001);
 
     // ---- Volume dos efeitos ----
-    this.sfxVolume = this.registry.get("sfxVolume") ?? 0.5;
+    const settings = loadSettings();
+    this.sfxVolume = settings.sfxVolume;
+    this.musicVolume = settings.musicVolume;
     const sfxY = height * 0.37;
 
     this.volumeText = this.add
@@ -65,7 +68,6 @@ export class PauseScene extends Phaser.Scene {
     );
 
     // ---- Volume da música ----
-    this.musicVolume = this.registry.get("musicVolume") ?? 0.25;
     const musicY = height * 0.46;
 
     this.musicVolumeText = this.add
@@ -149,6 +151,13 @@ export class PauseScene extends Phaser.Scene {
     );
 
     this.registry.set("sfxVolume", this.sfxVolume);
+
+    const settings = loadSettings();
+    saveSettings({
+      ...settings,
+      sfxVolume: this.sfxVolume,
+    });
+
     this.updateVolumeText();
   }
 
@@ -167,6 +176,12 @@ export class PauseScene extends Phaser.Scene {
     );
 
     this.registry.set("musicVolume", this.musicVolume);
+
+    const settings = loadSettings();
+    saveSettings({
+      ...settings,
+      musicVolume: this.musicVolume,
+    });
 
     const music = this.registry.get("backgroundMusicSound") as
       | MusicSound

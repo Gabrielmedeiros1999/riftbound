@@ -1,5 +1,6 @@
 
 import Phaser from "phaser";
+import { loadSettings } from "../utils/settings";
 
 export class MenuScene extends Phaser.Scene {
   constructor() {
@@ -10,6 +11,11 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = this.scale;
 
     this.cameras.main.setBackgroundColor("#0b0812");
+
+    const settings = loadSettings();
+
+    this.registry.set("sfxVolume", settings.sfxVolume);
+    this.registry.set("musicVolume", settings.musicVolume);
 
     // Brilho decorativo central
     const glow = this.add.graphics();

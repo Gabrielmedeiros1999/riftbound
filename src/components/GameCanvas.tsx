@@ -4,10 +4,11 @@ import { ArenaScene } from "../game/scenes/ArenaScene";
 import { MenuScene } from "../game/scenes/MenuScene";
 import { EndScene } from "../game/scenes/EndScene";
 import { PauseScene } from "../game/scenes/PauseScene";
-
+import { loadSettings } from "../game/utils/settings";
 
 export function GameCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const settings = loadSettings();
 
   useEffect(() => {
     const container = containerRef.current;
