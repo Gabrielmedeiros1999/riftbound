@@ -25,7 +25,7 @@ export class PauseScene extends Phaser.Scene {
       .setDepth(1000);
 
     this.add
-      .text(width / 2, height * 0.17, "PAUSADO", {
+      .text(width / 2, height * 0.13, "PAUSADO", {
         fontFamily: "monospace",
         fontSize: "38px",
         fontStyle: "bold",
@@ -35,7 +35,7 @@ export class PauseScene extends Phaser.Scene {
       .setDepth(1001);
 
     this.add
-      .text(width / 2, height * 0.25, "A arena aguarda seu retorno.", {
+      .text(width / 2, height * 0.21, "A arena aguarda seu retorno.", {
         fontFamily: "monospace",
         fontSize: "13px",
         color: "#d1d5db",
@@ -43,11 +43,13 @@ export class PauseScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(1001);
 
-    // ---- Volume dos efeitos ----
+    // ---- Carrega os volumes salvos ----
     const settings = loadSettings();
     this.sfxVolume = settings.sfxVolume;
     this.musicVolume = settings.musicVolume;
-    const sfxY = height * 0.37;
+
+    // ---- Volume dos efeitos ----
+    const sfxY = height * 0.34;
 
     this.volumeText = this.add
       .text(width / 2, sfxY, "", {
@@ -68,7 +70,7 @@ export class PauseScene extends Phaser.Scene {
     );
 
     // ---- Volume da música ----
-    const musicY = height * 0.46;
+    const musicY = height * 0.42;
 
     this.musicVolumeText = this.add
       .text(width / 2, musicY, "", {
@@ -89,18 +91,26 @@ export class PauseScene extends Phaser.Scene {
     );
 
     // ---- Botões principais ----
-    this.createButton(width / 2, height * 0.59, "[ CONTINUAR ]", () => {
+    this.createButton(width / 2, height * 0.54, "[ CONTINUAR ]", () => {
       this.scene.stop("PauseScene");
       this.scene.resume("ArenaScene");
     });
 
-    this.createButton(width / 2, height * 0.7, "[ REINICIAR ]", () => {
+    this.createButton(width / 2, height * 0.64, "[ TELA CHEIA ]", () => {
+      if (this.scale.isFullscreen) {
+        this.scale.stopFullscreen();
+      } else {
+        this.scale.startFullscreen();
+      }
+    });
+
+    this.createButton(width / 2, height * 0.74, "[ REINICIAR ]", () => {
       this.scene.stop("PauseScene");
       this.scene.stop("ArenaScene");
       this.scene.start("ArenaScene");
     });
 
-    this.createButton(width / 2, height * 0.81, "[ VOLTAR AO MENU ]", () => {
+    this.createButton(width / 2, height * 0.84, "[ VOLTAR AO MENU ]", () => {
       this.scene.stop("PauseScene");
       this.scene.stop("ArenaScene");
       this.scene.start("MenuScene");

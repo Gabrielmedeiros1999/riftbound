@@ -31,6 +31,8 @@ function App() {
               J — ataque básico
               <br />
               Espaço — esquiva
+              <br />
+              ESC — menu
             </p>
           </div>
 
