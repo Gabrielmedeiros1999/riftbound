@@ -1,5 +1,6 @@
 
 import Phaser from "phaser";
+import { getBestWave } from "../utils/records";
 
 type EndSceneData = {
   result: "victory" | "defeat";
@@ -13,6 +14,7 @@ export class EndScene extends Phaser.Scene {
   create(data: EndSceneData) {
     const { width, height } = this.scale;
     const victory = data.result === "victory";
+    const bestWave = getBestWave();
 
     this.cameras.main.setBackgroundColor("#0b0812");
 
@@ -40,7 +42,7 @@ export class EndScene extends Phaser.Scene {
       height * 0.4,
       victory
         ? "Você sobreviveu às fendas."
-        : "A arena consumiu você.",
+        : `A arena consumiu você. \n RECORDE: ONDA ${bestWave}`,
       {
         fontFamily: "monospace",
         fontSize: "14px",

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { saveBestWave } from "../utils/records";
 
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -1284,15 +1285,15 @@ private takeDamage() {
 
 
   // efeito de dano no jogador
-  this.player
-    .setTint(0xffffff)
-    .setTintMode(Phaser.TintModes.FILL);
+    this.player
+      .setTint(0xffffff)
+      .setTintMode(Phaser.TintModes.FILL);
 
-this.time.delayedCall(100, () => {
-  if (this.player && this.player.active) {
-    this.player.clearTint();
-  }
-});
+  this.time.delayedCall(100, () => {
+    if (this.player && this.player.active) {
+      this.player.clearTint();
+    }
+  });
 
   this.updateHUD();
 
@@ -1310,8 +1311,12 @@ this.time.delayedCall(100, () => {
     // então esta transição acontece uma única vez.
     this.gameOver = true;
 
+    const bestWave = saveBestWave(this.wave);
+
     this.scene.start("EndScene", {
       result: "defeat",
+      wave: this.wave,
+      bestWave,
     });
   }
 }
