@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { saveBestWave } from "../utils/records";
+import { saveMatch } from "../utils/history";
 
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -13,6 +14,8 @@ export class ArenaScene extends Phaser.Scene {
   };
 
   private escKey!: Phaser.Input.Keyboard.Key;
+
+  private matchStartTime = 0;
 
   // Posição lógica do personagem na arena.
   private worldX = 6;
@@ -189,6 +192,7 @@ export class ArenaScene extends Phaser.Scene {
     this.createPlayer();
     this.createEnemy();
     this.createHUD();
+    this.matchStartTime = Date.now();
 
     const musicVolume = this.registry.get("musicVolume") ?? 0.25;
 
@@ -1317,6 +1321,17 @@ private takeDamage() {
       result: "defeat",
       wave: this.wave,
       bestWave,
+    });
+
+    const survivalTime = Math.floor(
+      (Date.now() - this.matchStartTime) / 1000
+    );
+
+    saveMatch({
+      wave: this.wave,
+      level: this.level,
+      survivalTime,
+      date: new Date().toISOString(),
     });
   }
 }
