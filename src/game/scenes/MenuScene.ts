@@ -1,4 +1,3 @@
-
 import Phaser from "phaser";
 import { loadSettings } from "../utils/settings";
 
@@ -44,41 +43,32 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // Botão Jogar
-    const playButton = this.add
-      .text(width / 2, height * 0.55, "[ JOGAR ]", {
-        fontFamily: "monospace",
-        fontSize: "24px",
-        color: "#ffffff",
-        backgroundColor: "#5b21b6",
-        padding: { x: 28, y: 14 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
+    this.createButton(
+      width / 2,
+      height * 0.55,
+      "[ JOGAR ]",
+      () => this.scene.start("ArenaScene"),
+      "24px",
+      { x: 28, y: 14 },
+    );
 
-    playButton.on("pointerover", () => {
-      playButton.setStyle({ backgroundColor: "#7c3aed" });
-    });
-
-    playButton.on("pointerout", () => {
-      playButton.setStyle({ backgroundColor: "#5b21b6" });
-    });
-
-    playButton.on("pointerdown", () => {
-      this.scene.start("ArenaScene");
-    });
+    // Botão Estatísticas
+    this.createButton(width / 2, height * 0.66, "[ ESTATÍSTICAS ]", () =>
+      this.scene.start("StatisticsScene"),
+    );
 
     // Instruções
     this.add
       .text(
         width / 2,
-        height * 0.72,
+        height * 0.8,
         "WASD: MOVER  |  J: ATACAR  |  ESPAÇO: ESQUIVAR",
         {
           fontFamily: "monospace",
           fontSize: "11px",
           color: "#9ca3af",
           align: "center",
-        }
+        },
       )
       .setOrigin(0.5);
 
@@ -89,5 +79,35 @@ export class MenuScene extends Phaser.Scene {
         color: "#6b7280",
       })
       .setOrigin(0.5);
+  }
+
+  private createButton(
+    x: number,
+    y: number,
+    label: string,
+    onClick: () => void,
+    fontSize = "17px",
+    padding: { x: number; y: number } = { x: 20, y: 12 },
+  ) {
+    const button = this.add
+      .text(x, y, label, {
+        fontFamily: "monospace",
+        fontSize,
+        color: "#ffffff",
+        backgroundColor: "#5b21b6",
+        padding,
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+
+    button.on("pointerover", () => {
+      button.setStyle({ backgroundColor: "#7c3aed" });
+    });
+
+    button.on("pointerout", () => {
+      button.setStyle({ backgroundColor: "#5b21b6" });
+    });
+
+    button.on("pointerdown", onClick);
   }
 }
