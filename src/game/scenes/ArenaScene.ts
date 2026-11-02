@@ -3,6 +3,22 @@ import { saveBestWave } from "../utils/records";
 import { saveMatch } from "../utils/history";
 import { savePermanentStats } from "../utils/permanentStats";
 
+type UpgradeOption = {
+  title: string;
+  description: string;
+  apply: () => void;
+};
+
+type Projectile = {
+  shape: Phaser.GameObjects.Shape;
+  x: number;
+  y: number;
+  dirX: number;
+  dirY: number;
+  speed: number;
+  damage: number;
+  expiresAt: number;
+};
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private keys!: {
@@ -62,6 +78,13 @@ export class ArenaScene extends Phaser.Scene {
   private level = 1;
   private xpToNextLevel = 3;
   private playerDamage = 1;
+  private regenPerSecond = 0;
+  private lifeStealPerHit = 0;
+  private arrowLevel = 0;
+  private fireballLevel = 0;
+  private nextArrowTime = 0;
+  private nextFireballTime = 0;
+  private projectiles: Projectile[] = [];
 
   // Esquiva
   private dodgeUntil = 0;
@@ -128,6 +151,13 @@ export class ArenaScene extends Phaser.Scene {
   this.level = 1;
   this.xpToNextLevel = 3;
   this.playerDamage = 1;
+  this.regenPerSecond = 0;
+  this.lifeStealPerHit = 0;
+  this.arrowLevel = 0;
+  this.fireballLevel = 0;
+  this.nextArrowTime = 0;
+  this.nextFireballTime = 0;
+  this.projectiles = [];
   this.enemyMaxHealth = 3;
 
   // Jogador
@@ -420,6 +450,72 @@ private createEnemyDeathEffect(x: number, y: number, color: number) {
 }
 
 
+private getUpgradePool(): UpgradeOption[] {
+  const arrowName =
+    this.arrowLevel === 0 ? "ARCO ARCANO" : `ARCO ARCANO (NV ${this.arrowLevel + 1})`;
+  const fireName =
+    this.fireballLevel === 0 ? "BOLA DE FOGO" : `BOLA DE FOGO (NV ${this.fireballLevel + 1})`;
+
+  return [
+    {
+      title: "LAMINA APRIMORADA",
+      description: "Aumenta o dano em +1",
+      apply: () => {
+        this.playerDamage += 1;
+      },
+    },
+    {
+      title: "PASSOS VELOZES",
+      description: "Aumenta a velocidade em +0.5",
+      apply: () => {
+        this.speed += 0.5;
+      },
+    },
+    {
+      title: "VITALIDADE",
+      description: "+20 de vida maxima e recupera 20",
+      apply: () => {
+        this.playerMaxHealth += 20;
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 20);
+      },
+    },
+    {
+      title: "REGENERACAO",
+      description: `Regenera +1 de vida por segundo (atual: ${this.regenPerSecond})`,
+      apply: () => {
+        this.regenPerSecond += 1;
+      },
+    },
+    {
+      title: "SEDE DE SANGUE",
+      description: `Cura +2 de vida a cada golpe (atual: ${this.lifeStealPerHit})`,
+      apply: () => {
+        this.lifeStealPerHit += 2;
+      },
+    },
+    {
+      title: arrowName,
+      description:
+        this.arrowLevel === 0
+          ? "Dispara flechas automaticas no inimigo"
+          : "Flechas mais fortes e mais rapidas",
+      apply: () => {
+        this.arrowLevel += 1;
+      },
+    },
+    {
+      title: fireName,
+      description:
+        this.fireballLevel === 0
+          ? "Dispara bolas de fogo de dano alto"
+          : "Bolas de fogo mais fortes e frequentes",
+      apply: () => {
+        this.fireballLevel += 1;
+      },
+    },
+  ];
+}
+
 private showUpgradeSelection() {
   this.upgradePending = true;
   this.upgradeObjects = [];
@@ -447,20 +543,8 @@ private showUpgradeSelection() {
 
   this.upgradeObjects.push(title);
 
-  const options = [
-    {
-      title: "1. LAMINA APRIMORADA",
-      description: "Aumenta o dano em +1",
-    },
-    {
-      title: "2. PASSOS VELOZES",
-      description: "Aumenta a velocidade em +0.5",
-    },
-    {
-      title: "3. VITALIDADE",
-      description: "+20 de vida maxima e recupera 20",
-    },
-  ];
+  // Sorteia 3 opções diferentes entre todas as disponíveis.
+  const options = Phaser.Utils.Array.Shuffle(this.getUpgradePool()).slice(0, 3);
 
   options.forEach((option, index) => {
     const y = height / 2 - 45 + index * 75;
@@ -473,7 +557,7 @@ private showUpgradeSelection() {
       .setInteractive({ useHandCursor: true });
 
     const text = this.add
-      .text(width / 2, y, `${option.title}\n${option.description}`, {
+      .text(width / 2, y, `${index + 1}. ${option.title}\n${option.description}`, {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#ffffff",
@@ -484,37 +568,18 @@ private showUpgradeSelection() {
       .setScrollFactor(0)
       .setDepth(20002);
 
-    card.on("pointerover", () => {
-      card.setFillStyle(0x4c1d95);
-    });
-
-    card.on("pointerout", () => {
-      card.setFillStyle(0x1e1b2e);
-    });
-
-    card.on("pointerdown", () => {
-      this.chooseUpgrade(index);
-    });
+    card.on("pointerover", () => card.setFillStyle(0x4c1d95));
+    card.on("pointerout", () => card.setFillStyle(0x1e1b2e));
+    card.on("pointerdown", () => this.chooseUpgrade(option));
 
     this.upgradeObjects.push(card, text);
   });
 }
 
-private chooseUpgrade(index: number) {
+private chooseUpgrade(option: UpgradeOption) {
   if (!this.upgradePending) return;
 
-  if (index === 0) {
-    this.playerDamage += 1;
-  } else if (index === 1) {
-    this.speed += 0.5;
-  } else if (index === 2) {
-    this.playerMaxHealth += 20;
-    this.playerHealth = Math.min(
-      this.playerMaxHealth,
-      this.playerHealth + 20
-    );
-    this.updateHUD();
-  }
+  option.apply();
 
   this.upgradeObjects.forEach((object) => object.destroy());
   this.upgradeObjects = [];
@@ -829,7 +894,7 @@ if (this.enemyType === "runner") {
   this.enemy.setDepth(position.y);
  }
 
- private damageEnemy() {
+private damageEnemy() {
   if (!this.enemyAlive) return;
 
   const dx = this.enemyX - this.worldX;
@@ -841,29 +906,27 @@ if (this.enemyType === "runner") {
   }
 
   // Normaliza a direção para funcionar na diagonal.
-  const facingLength = Math.hypot(
-    this.facingX,
-    this.facingY,
-  );
-
+  const facingLength = Math.hypot(this.facingX, this.facingY);
   const facingX = this.facingX / facingLength;
   const facingY = this.facingY / facingLength;
 
   // Só acerta se o inimigo estiver à frente.
-  const dot =
-    (dx / distance) * facingX +
-    (dy / distance) * facingY;
+  const dot = (dx / distance) * facingX + (dy / distance) * facingY;
 
   if (dot < 0.5) return;
 
-  this.enemyHealth -= this.playerDamage;
+  this.hitEnemy(this.playerDamage);
+  this.healPlayer(this.lifeStealPerHit);
+}
+
+// Aplica dano ao inimigo (golpe, flecha ou bola de fogo).
+private hitEnemy(amount: number) {
+  if (!this.enemyAlive) return;
+
+  this.enemyHealth -= amount;
   this.playSfx("hit", 0.6);
 
-     this.showDamageNumber(
-        this.enemy.x,
-        this.enemy.y,
-        this.playerDamage,
-      );
+  this.showDamageNumber(this.enemy.x, this.enemy.y, amount);
 
   this.createHitEffect(
     this.enemyX,
@@ -872,20 +935,9 @@ if (this.enemyType === "runner") {
       ? 0xf97316
       : this.enemyType === "brute"
         ? 0xa855f7
-        : 0xef4444
+        : 0xef4444,
   );
 
-  if (this.enemyAlive) {
-    this.enemy.setAlpha(0.35);
-
-    this.time.delayedCall(90, () => {
-      if (this.enemyAlive && this.enemy.active) {
-        this.enemy.setAlpha(1);
-      }
-    });
-  }
-
-  // Atualiza a barra de vida.
   this.updateEnemyHealthBar();
 
   // Efeito visual de dano.
@@ -900,7 +952,18 @@ if (this.enemyType === "runner") {
   if (this.enemyHealth <= 0) {
     this.handleEnemyDefeated();
   }
- }
+}
+
+private healPlayer(amount: number) {
+  if (amount <= 0 || this.gameOver) return;
+
+  this.playerHealth = Math.min(
+    this.playerMaxHealth,
+    this.playerHealth + amount,
+  );
+
+  this.updateHUD();
+}
 
 
   private createPlayer() {
@@ -1349,6 +1412,120 @@ private takeDamage() {
   }
 }
 
+private updateRegeneration(delta: number) {
+  if (this.regenPerSecond <= 0) return;
+  if (this.playerHealth >= this.playerMaxHealth) return;
+
+  this.playerHealth = Math.min(
+    this.playerMaxHealth,
+    this.playerHealth + this.regenPerSecond * (delta / 1000),
+  );
+}
+
+private updateAutoWeapons() {
+  if (!this.enemyAlive) return;
+
+  const now = this.time.now;
+
+  if (this.arrowLevel > 0 && now >= this.nextArrowTime) {
+    this.nextArrowTime =
+      now + Math.max(500, 1400 - (this.arrowLevel - 1) * 150);
+
+    const damage =
+      Math.max(1, Math.ceil(this.playerDamage / 2)) + (this.arrowLevel - 1);
+
+    this.fireProjectile("arrow", damage);
+  }
+
+  if (this.fireballLevel > 0 && now >= this.nextFireballTime) {
+    this.nextFireballTime =
+      now + Math.max(1500, 3500 - (this.fireballLevel - 1) * 400);
+
+    const damage =
+      this.playerDamage * 2 + (this.fireballLevel - 1) * 2;
+
+    this.fireProjectile("fireball", damage);
+  }
+}
+
+private fireProjectile(kind: "arrow" | "fireball", damage: number) {
+  const dx = this.enemyX - this.worldX;
+  const dy = this.enemyY - this.worldY;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance === 0) return;
+
+  const dirX = dx / distance;
+  const dirY = dy / distance;
+  const isFireball = kind === "fireball";
+
+  const shape: Phaser.GameObjects.Shape = isFireball
+    ? this.add.circle(0, 0, 8, 0xf97316).setStrokeStyle(3, 0xef4444)
+    : this.add.rectangle(0, 0, 16, 3, 0xfde68a);
+
+  // Gira a flecha para apontar na direção visual (isométrica).
+  shape.setRotation(
+    Math.atan2(
+      (dirX + dirY) * (this.tileHeight / 2),
+      (dirX - dirY) * (this.tileWidth / 2),
+    ),
+  );
+
+  const projectile: Projectile = {
+    shape,
+    x: this.worldX,
+    y: this.worldY,
+    dirX,
+    dirY,
+    speed: isFireball ? 5 : 9,
+    damage,
+    expiresAt: this.time.now + 2000,
+  };
+
+  this.projectiles.push(projectile);
+  this.positionProjectile(projectile);
+}
+
+private positionProjectile(projectile: Projectile) {
+  const position = this.projectPosition(projectile.x, projectile.y);
+
+  projectile.shape.setPosition(position.x, position.y - 14);
+  projectile.shape.setDepth(position.y + 50);
+}
+
+private updateProjectiles(delta: number) {
+  const step = delta / 1000;
+
+  for (let i = this.projectiles.length - 1; i >= 0; i--) {
+    const projectile = this.projectiles[i];
+
+    projectile.x += projectile.dirX * projectile.speed * step;
+    projectile.y += projectile.dirY * projectile.speed * step;
+    this.positionProjectile(projectile);
+
+    let remove =
+      this.time.now > projectile.expiresAt ||
+      projectile.x < 0 ||
+      projectile.x > 12 ||
+      projectile.y < 0 ||
+      projectile.y > 12;
+
+    if (
+      !remove &&
+      this.enemyAlive &&
+      Math.hypot(this.enemyX - projectile.x, this.enemyY - projectile.y) < 0.5
+    ) {
+      this.hitEnemy(projectile.damage);
+      remove = true;
+    }
+
+    if (remove) {
+      projectile.shape.destroy();
+      this.projectiles.splice(i, 1);
+    }
+  }
+}
+
   update(_time: number, delta: number) {
 
     if (this.gameOver) {
@@ -1359,6 +1536,7 @@ private takeDamage() {
       return;
     }
 
+    this.updateRegeneration(delta);
     this.updateHUD();
 
     let dx = 0;
@@ -1495,6 +1673,9 @@ private takeDamage() {
     if (this.gameOver) {
       return;
     }
+
+    this.updateAutoWeapons();
+    this.updateProjectiles(delta);
 
     // Indica visualmente o período de invulnerabilidade.
     this.player.setAlpha(
