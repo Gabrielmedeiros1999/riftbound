@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getStatistics } from "../utils/statistics";
+import { getPermanentStats } from "../utils/permanentStats";
 
 export class StatisticsScene extends Phaser.Scene {
   constructor() {
@@ -7,9 +7,8 @@ export class StatisticsScene extends Phaser.Scene {
   }
 
   create() {
-    const stats = getStatistics();
-
     const centerX = this.scale.width / 2;
+    const permanent = getPermanentStats();
 
     this.add.rectangle(
       centerX,
@@ -30,15 +29,15 @@ export class StatisticsScene extends Phaser.Scene {
       }
     ).setOrigin(0.5);
 
-    const minutes = Math.floor(stats.totalSurvivalTime / 60);
-    const seconds = stats.totalSurvivalTime % 60;
+    const minutes = Math.floor(permanent.totalSurvivalTime / 60);
+    const seconds = permanent.totalSurvivalTime % 60;
 
     const statisticsText = [
-      `PARTIDAS JOGADAS: ${stats.totalMatches}`,
-      `MAIOR ONDA: ${stats.bestWave}`,
-      `MAIOR NÍVEL: ${stats.highestLevel}`,
+      `PARTIDAS JOGADAS: ${permanent.totalMatches}`,
+      `MAIOR ONDA: ${permanent.highestWave}`,
+      `MAIOR NÍVEL: ${permanent.highestLevel}`,
+      `INIMIGOS DERROTADOS: ${permanent.totalEnemiesDefeated}`,
       `TEMPO TOTAL: ${minutes}m ${seconds}s`,
-      `MÉDIA DE ONDAS: ${stats.averageWave}`,
     ].join("\n\n");
 
     this.add.text(

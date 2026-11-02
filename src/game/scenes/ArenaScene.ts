@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { saveBestWave } from "../utils/records";
 import { saveMatch } from "../utils/history";
+import { savePermanentStats } from "../utils/permanentStats";
 
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -108,6 +109,7 @@ export class ArenaScene extends Phaser.Scene {
   private readonly contactDamage = 10;
   private readonly damageCooldown = 800;
 
+  private totalEnemiesDefeated = 0;
 
   private backgroundMusic!: Phaser.Sound.BaseSound;
 
@@ -120,6 +122,7 @@ export class ArenaScene extends Phaser.Scene {
   this.wave = 1;
   this.enemiesRemainingInWave = 3;
   this.spawnIndex = 0;
+  this.totalEnemiesDefeated = 0;
 
   this.xp = 0;
   this.level = 1;
@@ -193,6 +196,7 @@ export class ArenaScene extends Phaser.Scene {
     this.createEnemy();
     this.createHUD();
     this.matchStartTime = Date.now();
+    this.totalEnemiesDefeated = 0;
 
     const musicVolume = this.registry.get("musicVolume") ?? 0.25;
 
@@ -734,6 +738,7 @@ if (this.enemyType === "runner") {
   this.enemy.destroy();
 
   this.gainXP(1);
+  this.totalEnemiesDefeated++;
   this.enemiesRemainingInWave -= 1;
   this.updateHUD();
 
@@ -1317,12 +1322,6 @@ private takeDamage() {
 
     const bestWave = saveBestWave(this.wave);
 
-    this.scene.start("EndScene", {
-      result: "defeat",
-      wave: this.wave,
-      bestWave,
-    });
-
     const survivalTime = Math.floor(
       (Date.now() - this.matchStartTime) / 1000
     );
@@ -1331,7 +1330,21 @@ private takeDamage() {
       wave: this.wave,
       level: this.level,
       survivalTime,
+      enemiesDefeated: this.totalEnemiesDefeated,
       date: new Date().toISOString(),
+    });
+
+    savePermanentStats({
+      wave: this.wave,
+      level: this.level,
+      survivalTime,
+      enemiesDefeated: this.totalEnemiesDefeated,
+    });
+
+    this.scene.start("EndScene", {
+      result: "defeat",
+      wave: this.wave,
+      bestWave,
     });
   }
 }
