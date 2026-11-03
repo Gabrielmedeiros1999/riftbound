@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { saveBestWave } from "../utils/records";
 import { saveMatch } from "../utils/history";
 import { savePermanentStats } from "../utils/permanentStats";
+import { unlockAchievement } from "../utils/achievements";
 
 type UpgradeOption = {
   title: string;
@@ -295,6 +296,71 @@ private playHeroAnimation(action: "idle" | "walk" | "attack") {
 
   if (this.player.anims.currentAnim?.key !== key) {
     this.player.play(key);
+  }
+}
+
+private showAchievementNotification(id: string): void {
+  const achievement = {
+    "wave-5": "SOBREVIVENTE",
+    "wave-10": "GUERREIRO IMPLACÁVEL",
+    "kills-100": "CAÇADOR DE MONSTROS",
+    "survival-10": "RESISTÊNCIA",
+  }[id];
+
+  if (!achievement) return;
+
+  const notification = this.add.text(
+    this.scale.width / 2,
+    90,
+    `CONQUISTA DESBLOQUEADA!\n${achievement}`,
+    {
+      fontSize: "18px",
+      color: "#facc15",
+      backgroundColor: "#161616",
+      padding: { x: 16, y: 12 },
+      align: "center",
+    }
+  )
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(10000);
+
+  this.tweens.add({
+    targets: notification,
+    alpha: 0,
+    delay: 3000,
+    duration: 700,
+    onComplete: () => notification.destroy(),
+  });
+}
+
+private checkAchievements(): void {
+  if (this.wave >= 5) {
+    this.unlockAndNotify("wave-5");
+  }
+
+  if (this.wave >= 10) {
+    this.unlockAndNotify("wave-10");
+  }
+
+  if (this.totalEnemiesDefeated >= 100) {
+    this.unlockAndNotify("kills-100");
+  }
+
+  const survivalTime = Math.floor(
+    (Date.now() - this.matchStartTime) / 1000
+  );
+
+  if (survivalTime >= 600) {
+    this.unlockAndNotify("survival-10");
+  }
+}
+
+private unlockAndNotify(id: string): void {
+  const unlocked = unlockAchievement(id);
+
+  if (unlocked) {
+    this.showAchievementNotification(id);
   }
 }
 
@@ -1404,6 +1470,8 @@ private takeDamage() {
       enemiesDefeated: this.totalEnemiesDefeated,
     });
 
+    this.unlockAndNotify("first-match");
+
     this.scene.start("EndScene", {
       result: "defeat",
       wave: this.wave,
@@ -1538,6 +1606,7 @@ private updateProjectiles(delta: number) {
 
     this.updateRegeneration(delta);
     this.updateHUD();
+    this.checkAchievements();
 
     let dx = 0;
     let dy = 0;

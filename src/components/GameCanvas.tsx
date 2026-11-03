@@ -5,6 +5,7 @@ import { MenuScene } from "../game/scenes/MenuScene";
 import { EndScene } from "../game/scenes/EndScene";
 import { PauseScene } from "../game/scenes/PauseScene";
 import { StatisticsScene } from "../game/scenes/StatisticsScene";
+import { AchievementsScene } from "../game/scenes/AchievementsScene";
 
 export function GameCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,7 +24,7 @@ export function GameCanvas() {
       backgroundColor: "#0f172a",
       pixelArt: true,
       antialias: false,
-      scene: [MenuScene, ArenaScene, EndScene, PauseScene, StatisticsScene],
+      scene: [MenuScene, ArenaScene, EndScene, PauseScene, StatisticsScene, AchievementsScene ],
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,

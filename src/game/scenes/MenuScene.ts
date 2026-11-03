@@ -52,6 +52,15 @@ export class MenuScene extends Phaser.Scene {
       { x: 28, y: 14 },
     );
 
+    this.createButton(
+    this.scale.width / 2,
+    this.scale.height * 0.74,
+    "CONQUISTAS",
+    () => {
+      this.scene.start("AchievementsScene");
+    }
+  );
+
     // Botão Estatísticas
     this.createButton(width / 2, height * 0.66, "[ ESTATÍSTICAS ]", () =>
       this.scene.start("StatisticsScene"),
