@@ -299,40 +299,130 @@ private playHeroAnimation(action: "idle" | "walk" | "attack") {
   }
 }
 
+
 private showAchievementNotification(id: string): void {
-  const achievement = {
-    "wave-5": "SOBREVIVENTE",
-    "wave-10": "GUERREIRO IMPLACÁVEL",
-    "kills-100": "CAÇADOR DE MONSTROS",
-    "survival-10": "RESISTÊNCIA",
-  }[id];
+  const achievements: Record<
+    string,
+    { title: string; description: string }
+  > = {
+    "first-match": {
+      title: "PRIMEIRA BATALHA",
+      description: "Você entrou em combate pela primeira vez!",
+    },
+    "wave-5": {
+      title: "SOBREVIVENTE",
+      description: "Você alcançou a onda 5!",
+    },
+    "wave-10": {
+      title: "GUERREIRO IMPLACÁVEL",
+      description: "Você alcançou a onda 10!",
+    },
+    "kills-100": {
+      title: "CAÇADOR DE MONSTROS",
+      description: "Você derrotou 100 inimigos!",
+    },
+    "survival-10": {
+      title: "RESISTÊNCIA",
+      description: "Você sobreviveu por 10 minutos!",
+    },
+  };
+
+  const achievement = achievements[id];
 
   if (!achievement) return;
 
-  const notification = this.add.text(
-    this.scale.width / 2,
-    90,
-    `CONQUISTA DESBLOQUEADA!\n${achievement}`,
+  const width = 340;
+  const height = 90;
+
+  const notification = this.add.container(
+    this.scale.width + width,
+    35
+  );
+
+  notification.setScrollFactor(0);
+  notification.setDepth(10000);
+
+  const background = this.add.rectangle(
+    0,
+    0,
+    width,
+    height,
+    0x161616,
+    0.96
+  );
+
+  background.setStrokeStyle(2, 0xfacc15);
+
+  const icon = this.add.text(
+    -width / 2 + 35,
+    0,
+    "★",
     {
-      fontSize: "18px",
+      fontSize: "36px",
       color: "#facc15",
-      backgroundColor: "#161616",
-      padding: { x: 16, y: 12 },
-      align: "center",
     }
-  )
-    .setOrigin(0.5)
-    .setScrollFactor(0)
-    .setDepth(10000);
+  ).setOrigin(0.5);
+
+  const title = this.add.text(
+    -width / 2 + 65,
+    -17,
+    "CONQUISTA DESBLOQUEADA!",
+    {
+      fontSize: "13px",
+      color: "#facc15",
+      fontStyle: "bold",
+    }
+  );
+
+  const name = this.add.text(
+    -width / 2 + 65,
+    5,
+    achievement.title,
+    {
+      fontSize: "17px",
+      color: "#ffffff",
+      fontStyle: "bold",
+    }
+  );
+
+  const description = this.add.text(
+    -width / 2 + 65,
+    28,
+    achievement.description,
+    {
+      fontSize: "11px",
+      color: "#aaaaaa",
+    }
+  );
+
+  notification.add([
+    background,
+    icon,
+    title,
+    name,
+    description,
+  ]);
 
   this.tweens.add({
     targets: notification,
-    alpha: 0,
-    delay: 3000,
-    duration: 700,
-    onComplete: () => notification.destroy(),
+    x: this.scale.width - width / 2 - 20,
+    duration: 500,
+    ease: "Back.Out",
+    onComplete: () => {
+      this.time.delayedCall(3000, () => {
+        this.tweens.add({
+          targets: notification,
+          x: this.scale.width + width,
+          alpha: 0,
+          duration: 400,
+          ease: "Power2",
+          onComplete: () => notification.destroy(),
+        });
+      });
+    },
   });
 }
+
 
 private checkAchievements(): void {
   if (this.wave >= 5) {
