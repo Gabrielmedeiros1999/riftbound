@@ -59,7 +59,7 @@ export class SelectionScene extends Phaser.Scene {
 
       background.setInteractive({ useHandCursor: true });
 
-      const name = this.add.text(
+     this.add.text(
         x,
         y - 85,
         characterClass.name.toUpperCase(),
@@ -70,7 +70,7 @@ export class SelectionScene extends Phaser.Scene {
         }
       ).setOrigin(0.5);
 
-      const description = this.add.text(
+      this.add.text(
         x,
         y - 30,
         characterClass.description,
@@ -82,7 +82,7 @@ export class SelectionScene extends Phaser.Scene {
         }
       ).setOrigin(0.5);
 
-      const attributes = this.add.text(
+      this.add.text(
         x,
         y + 55,
         [
