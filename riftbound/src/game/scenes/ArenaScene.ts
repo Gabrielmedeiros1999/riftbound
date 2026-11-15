@@ -260,44 +260,42 @@ export class ArenaScene extends Phaser.Scene {
     "hero",
     "assets/characters/hero/Hero_Knight_full.png",
     {
-      frameWidth: 80,
-      frameHeight: 82,
+      frameWidth: 68,
+      frameHeight: 68,
     }
   );
     this.load.spritesheet(
     "hero-assassin",
     "assets/characters/assassin/Cutthroat_full.png",
-    { frameWidth: 92, frameHeight: 94 }
+    { frameWidth: 64, frameHeight: 64 }
   );
 
   this.load.spritesheet(
     "hero-mage",
     "assets/characters/mage/RenegadeMage_full.png",
-    { frameWidth: 92, frameHeight: 94 }
+    { frameWidth: 68, frameHeight: 68 }
   );
   this.load.audio(
     "background-music",
     "assets/audio/music.mp3",
   );
     this.load.spritesheet("enemy-zombie", "assets/enemies/Zombie_full.png", {
-    frameWidth: 82,
-    frameHeight: 86,
+    frameWidth: 64,
+    frameHeight: 64,
   });
 
   this.load.spritesheet("enemy-ghoul", "assets/enemies/Ghoul_full.png", {
-    frameWidth: 82,
-    frameHeight: 86,
+    frameWidth: 68,
+    frameHeight: 68,
   });
 
   this.load.spritesheet("enemy-bloated", "assets/enemies/BloatedZombie_full.png", {
-    frameWidth: 82,
-    frameHeight: 86,
+    frameWidth: 60,
+    frameHeight: 60,
   });
-    this.load.atlasXML(
-    "terrain",
-    "assets/terrain/landscapeTiles_sheet.png",
-    "assets/terrain/landscapeTiles_sheet.xml"
-  );
+  this.load.image("terrain-grass", "assets/terrain/grass_tile.png");
+  this.load.image("terrain-dirt", "assets/terrain/dirt_tile.png");
+  this.load.image("terrain-sand", "assets/terrain/sand_tile.png");
  }
 
 
@@ -357,7 +355,9 @@ export class ArenaScene extends Phaser.Scene {
     this.createRiftDecorations();
     this.createObstacles();
     this.createHeroAnimations();
-    this.createEnemyAnimations();
+    this.createPixelLabEnemyAnimations("enemy-zombie");
+    this.createPixelLabEnemyAnimations("enemy-ghoul");
+    this.createPixelLabEnemyAnimations("enemy-bloated");
     this.createPlayer();
     this.createEnemy();
     this.createHUD();
@@ -447,6 +447,58 @@ export class ArenaScene extends Phaser.Scene {
         16
       );
     });
+  }
+
+
+     private createPixelLabAnimations(
+    textureKey: string,
+    walkFirstRow: number,
+    attackFirstRow: number
+  ) {
+    const columns = 16;
+
+    const directions = [
+      { name: "south", index: 0 },
+      { name: "east", index: 2 },
+      { name: "north", index: 4 },
+      { name: "west", index: 6 },
+    ];
+
+    for (const direction of directions) {
+      // Idle: um quadro por direção (linha 0).
+      this.anims.create({
+        key: `${textureKey}-idle-${direction.name}`,
+        frames: [{ key: textureKey, frame: direction.index }],
+        frameRate: 1,
+        repeat: -1,
+      });
+
+      // Walk: 8 quadros.
+      const walkStart = (walkFirstRow + direction.index) * columns;
+
+      this.anims.create({
+        key: `${textureKey}-walk-${direction.name}`,
+        frames: this.anims.generateFrameNumbers(textureKey, {
+          start: walkStart,
+          end: walkStart + 7,
+        }),
+        frameRate: 10,
+        repeat: -1,
+      });
+
+      // Ataque: 16 quadros.
+      const attackStart = (attackFirstRow + direction.index) * columns;
+
+      this.anims.create({
+        key: `${textureKey}-attack-${direction.name}`,
+        frames: this.anims.generateFrameNumbers(textureKey, {
+          start: attackStart,
+          end: attackStart + 15,
+        }),
+        frameRate: 32,
+        repeat: 0,
+      });
+    }
   }
 
     private checkDashDamage(): void {
@@ -743,47 +795,12 @@ private gainXP(amount: number) {
 }
 
 private createHeroAnimations() {
-  const animations = [
-    { name: "idle-south", row: 0, frames: 4, rate: 5 },
-    { name: "idle-north", row: 1, frames: 4, rate: 5 },
-    { name: "idle-east", row: 2, frames: 4, rate: 5 },
-    { name: "idle-west", row: 3, frames: 4, rate: 5 },
 
-    { name: "walk-south", row: 4, frames: 6, rate: 9 },
-    { name: "walk-north", row: 5, frames: 6, rate: 9 },
-    { name: "walk-east", row: 6, frames: 6, rate: 9 },
-    { name: "walk-west", row: 7, frames: 6, rate: 9 },
 
-    { name: "attack-south", row: 8, frames: 6, rate: 12 },
-    { name: "attack-north", row: 9, frames: 6, rate: 12 },
-    { name: "attack-east", row: 10, frames: 6, rate: 12 },
-    { name: "attack-west", row: 11, frames: 6, rate: 12 },
-  ];
+    this.createPixelLabAnimations("hero", 9, 1);
+    this.createPixelLabAnimations("hero-assassin", 1, 9);
+    this.createPixelLabAnimations("hero-mage", 9, 1);
 
-  const sheets = [
-    { key: "hero", columns: 6 },
-    { key: "hero-assassin", columns: 8 },
-    { key: "hero-mage", columns: 8 },
-  ];
-
-  for (const sheet of sheets) {
-    for (const animation of animations) {
-      const start = animation.row * sheet.columns;
-
-      this.anims.create({
-        key: `${sheet.key}-${animation.name}`,
-        frames: this.anims.generateFrameNumbers(sheet.key, {
-          start,
-          end: start + animation.frames - 1,
-        }),
-        frameRate: animation.rate,
-        repeat: animation.name.startsWith("idle") ||
-          animation.name.startsWith("walk")
-          ? -1
-          : 0,
-      });
-    }
-  }
 }
 
 
@@ -1022,25 +1039,27 @@ private chooseUpgrade(option: UpgradeOption) {
 }
 
 
-  private drawArena() {
-    const frames = [
-      "landscapeTiles_067.png", "landscapeTiles_067.png",
-      "landscapeTiles_067.png", "landscapeTiles_067.png",
-      "landscapeTiles_067.png", "landscapeTiles_067.png",
-      "landscapeTiles_067.png", "landscapeTiles_083.png",
-      "landscapeTiles_059.png", "landscapeTiles_067.png",
+   private drawArena() {
+    const textures = [
+      "terrain-grass", "terrain-grass", "terrain-grass",
+      "terrain-grass", "terrain-grass", "terrain-grass",
+      "terrain-grass", "terrain-dirt", "terrain-sand",
+      "terrain-grass",
     ];
 
     for (let x = 0; x < 12; x++) {
       for (let y = 0; y < 12; y++) {
         const center = this.projectPosition(x + 0.5, y + 0.5);
 
-        const frame = frames[(x * 7 + y * 13) % frames.length];
+        // Sorteio fixo por tile (sempre o mesmo a cada partida).
+        let hash = Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
+        hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+        const key = textures[(hash >>> 0) % textures.length];
 
-        const tile = this.add.image(center.x, center.y, "terrain", frame);
+        const tile = this.add.image(center.x, center.y, key);
 
-        tile.setOrigin(0.5, 33 / 99);
-        tile.setScale(64 / 132);
+        tile.setOrigin(0.5, 27.5 / 64);
+        tile.setScale(64 / 54, 32 / 35);
         tile.setDepth(-1000 + x + y);
       }
     }
@@ -1148,7 +1167,7 @@ if (this.enemyType === "runner") {
 }
   
   
-  private createEnemy() {
+    private createEnemy() {
     const position = this.projectPosition(
       this.enemyX,
       this.enemyY,
@@ -1161,7 +1180,15 @@ if (this.enemyType === "runner") {
     const shadow = this.add.ellipse(0, 2, 25, 12, 0x020617, 0.6);
 
     this.enemySprite = this.add.sprite(0, 0, textureKey);
-    this.enemySprite.setOrigin(0.5, 77 / 86);
+
+    const enemyOrigins: Record<string, number> = {
+      "enemy-zombie": 53 / 64,
+      "enemy-ghoul": 56 / 68,
+      "enemy-bloated": 50 / 60,
+    };
+
+    this.enemySprite.setOrigin(0.5, enemyOrigins[textureKey]);
+    this.enemySprite.setScale(textureKey === "enemy-bloated" ? 1.3 : 1);
     this.enemyFacing = "south";
     this.enemySprite.play(`${textureKey}-idle-south`);
 
@@ -1225,6 +1252,12 @@ if (this.enemyType === "runner") {
   private updateEnemyHealthBar() {
     this.enemyHealthBar.clear();
   
+    const barY =
+      this.enemyType === "runner"
+        ? -56
+        : this.enemyType === "brute"
+          ? -60
+          : -52;
     const barWidth = 30;
     const barHeight = 4;
     const healthRatio =
@@ -1233,7 +1266,7 @@ if (this.enemyType === "runner") {
     this.enemyHealthBar.fillStyle(0x450a0a, 1);
     this.enemyHealthBar.fillRect(
       -barWidth / 2,
-      -75,
+      barY,
       barWidth,
       barHeight,
     );
@@ -1241,56 +1274,60 @@ if (this.enemyType === "runner") {
     this.enemyHealthBar.fillStyle(0xef4444, 1);
     this.enemyHealthBar.fillRect(
       -barWidth / 2,
-      -75,
+      barY,
       barWidth * healthRatio,
       barHeight,
     );
   }
 
-    private createEnemyAnimations() {
+    private createPixelLabEnemyAnimations(textureKey: string) {
     const columns = 8;
-    const directions = ["south", "north", "east", "west"];
 
-    const textures = ["enemy-zombie", "enemy-ghoul", "enemy-bloated"];
+    const directions = [
+      { name: "south", index: 0 },
+      { name: "east", index: 2 },
+      { name: "north", index: 4 },
+      { name: "west", index: 6 },
+    ];
 
-    for (const texture of textures) {
-      directions.forEach((direction, index) => {
-        const idleStart = index * columns;
-        const walkStart = (index + 4) * columns;
-        const attackStart = (index + 8) * columns;
+    for (const direction of directions) {
+      // Idle: um quadro por direção (linha 0).
+      this.anims.create({
+        key: `${textureKey}-idle-${direction.name}`,
+        frames: [{ key: textureKey, frame: direction.index }],
+        frameRate: 1,
+        repeat: -1,
+      });
 
-        this.anims.create({
-          key: `${texture}-attack-${direction}`,
-          frames: this.anims.generateFrameNumbers(texture, {
-            start: attackStart,
-            end: attackStart + 5,
-          }),
-          frameRate: 12,
-          repeat: 0,
-        });
+      // Walk: linhas 1 a 8, 8 quadros.
+      const walkStart = (1 + direction.index) * columns;
 
-        this.anims.create({
-          key: `${texture}-idle-${direction}`,
-          frames: this.anims.generateFrameNumbers(texture, {
-            start: idleStart,
-            end: idleStart + 3,
-          }),
-          frameRate: 5,
-          repeat: -1,
-        });
+      this.anims.create({
+        key: `${textureKey}-walk-${direction.name}`,
+        frames: this.anims.generateFrameNumbers(textureKey, {
+          start: walkStart,
+          end: walkStart + 7,
+        }),
+        frameRate: 12,
+        repeat: -1,
+      });
 
-        this.anims.create({
-          key: `${texture}-walk-${direction}`,
-          frames: this.anims.generateFrameNumbers(texture, {
-            start: walkStart,
-            end: walkStart + 5,
-          }),
-          frameRate: 9,
-          repeat: -1,
-        });
+      // Ataque: linhas 9 a 16, 8 quadros (0,5 s).
+      const attackStart = (9 + direction.index) * columns;
+
+      this.anims.create({
+        key: `${textureKey}-attack-${direction.name}`,
+        frames: this.anims.generateFrameNumbers(textureKey, {
+          start: attackStart,
+          end: attackStart + 7,
+        }),
+        frameRate: 16,
+        repeat: 0,
       });
     }
   }
+
+
 
   private updateEnemy(delta: number) {
   if (!this.enemyAlive) return;
@@ -1436,7 +1473,7 @@ private healPlayer(amount: number) {
       this.heroTexture
     );
 
-    this.player.setOrigin(0.5, this.heroTexture === "hero" ? 1 : 79 / 94);
+    this.player.setOrigin(0.5, this.heroTexture === "hero" ? 56 / 68 : 79 / 94);
     this.player.setScale(1);
     this.player.setDepth(position.y);
 

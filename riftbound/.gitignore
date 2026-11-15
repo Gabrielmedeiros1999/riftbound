@@ -12,11 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Assets da VibeForge e freesounds (licença não permite redistribuir os arquivos)
-public/assets/characters/
-public/assets/enemies/
-public/assets/audio/
-public/assets/terrain/
 
 # Editor directories and files
 .vscode/*
