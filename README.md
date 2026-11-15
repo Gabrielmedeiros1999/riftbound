@@ -86,31 +86,6 @@ O jogo utiliza `localStorage` para armazenar informações localmente, incluindo
 | Espaço | Esquivar |
 | ESC | Pausar o jogo |
 
-## 🎨 Assets e créditos
-
-Os personagens e inimigos usam assets de terceiros, que **não estão incluídos
-neste repositório** por restrições de licença (os autores não permitem
-redistribuir os arquivos). Para rodar o jogo com os gráficos completos, baixe
-cada pack e coloque os arquivos nos caminhos indicados:
-
-| Pack | Autor | Arquivo | Destino |
-|---|---|---|---|
-| [Free Knight](https://vibeforge.itch.io/free-knight-top-down-pixel-art-character) | VibeForge | `Hero_Knight_full.png` | `public/assets/characters/hero/` |
-| [Bandit & Mercenary Pack](https://vibeforge.itch.io/bandit-mercenary-pack) | VibeForge | `Bandit_Cutthroat_full.png` | `public/assets/characters/assassin/Cutthroat_full.png` |
-| Bandit & Mercenary Pack | VibeForge | `Bandit_RenegadeMage_full.png` | `public/assets/characters/mage/RenegadeMage_full.png` |
-| Undead Night Horde Pack | VibeForge | `Undead_Zombie_full.png`, `Undead_Ghoul_full.png`, `Undead_BloatedZombie_full.png` | `public/assets/enemies/` (como `Zombie_full.png`, `Ghoul_full.png`, `BloatedZombie_full.png`) |
-
-Os packs estão em [vibeforge.itch.io](https://vibeforge.itch.io). Cada um tem
-sua própria licença: leia antes de usar.
-
-Incluídos no repositório:
-
-- **Terreno:** [Isometric Tiles Landscape](https://kenney.nl/assets/isometric-tiles-landscape),
-  por Kenney (CC0 / domínio público).
-- **Áudio:** (via [Freesound](https://freesound.org))
-
-> Sem os arquivos dos packs, o jogo não carrega os personagens corretamente.
-
 ## 🚀 Como executar o projeto
 
 ### Pré-requisitos
