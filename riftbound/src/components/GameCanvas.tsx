@@ -10,7 +10,6 @@ import { SelectionScene } from "../game/scenes/SelectionScene";
 
 export function GameCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
- 
 
   useEffect(() => {
     const container = containerRef.current;
@@ -25,10 +24,12 @@ export function GameCanvas() {
       backgroundColor: "#0f172a",
       pixelArt: true,
       antialias: false,
-      scene: [MenuScene, ArenaScene, EndScene, PauseScene, StatisticsScene, AchievementsScene, SelectionScene, ],
+      scene: [MenuScene, ArenaScene, EndScene, PauseScene, StatisticsScene, AchievementsScene, SelectionScene],
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
+        // A própria div entra em tela cheia, então o FIT passa a medir a tela toda.
+        fullscreenTarget: container,
       },
     });
 
@@ -37,5 +38,5 @@ export function GameCanvas() {
     };
   }, []);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return <div ref={containerRef} className="h-full w-full bg-slate-950" />;
 }
