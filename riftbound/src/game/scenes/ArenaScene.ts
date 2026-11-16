@@ -22,6 +22,25 @@ type Projectile = {
   damage: number;
   expiresAt: number;
 };
+type EnemyType = "normal" | "runner" | "brute";
+
+type Enemy = {
+  id: number;
+  type: EnemyType;
+  x: number;
+  y: number;
+  health: number;
+  maxHealth: number;
+  speed: number;
+  alive: boolean;
+  facing: "south" | "north" | "east" | "west";
+  attackUntil: number;
+  nextDamageTime: number;
+  container: Phaser.GameObjects.Container;
+  sprite: Phaser.GameObjects.Sprite;
+  healthBar: Phaser.GameObjects.Graphics;
+};
+
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private keys!: {
@@ -84,25 +103,23 @@ export class ArenaScene extends Phaser.Scene {
   private readonly attackCooldown = 350;
   private nextAttackTime = 0;
 
-  // Posição do primeiro inimigo na arena.
-  private enemyX = 8;
-  private enemyY = 6;
+  // Inimigos atualmente vivos na arena.
+  private enemies: Enemy[] = [];
+  private nextEnemyId = 0;
 
-  private enemy!: Phaser.GameObjects.Container;
-  private enemyHealthBar!: Phaser.GameObjects.Graphics;
+  // Inimigos da onda que ainda não foram criados.
+  private enemiesToSpawn = 3;
+  // Inimigos já agendados para aparecer (evita passar do limite).
+  private pendingSpawns = 0;
+  // Limite máximo de inimigos simultâneos, em qualquer onda.
+  private readonly maxConcurrentEnemiesCap = 5;
 
-  private enemyHealth = 3;
-  private enemyMaxHealth = 3;
-  private enemySpeed = 0.9;
-  private enemyAlive = true;
+  // Inimigos já atingidos pelo dash atual (cada um leva só um golpe).
+  private dashHitEnemies = new Set<number>();
 
-  private enemySprite!: Phaser.GameObjects.Sprite;
-  private enemyFacing: "south" | "north" | "east" | "west" = "south";
-  private enemyAttackUntil = 0;
-
-    private getEnemyTexture(): string {
-    if (this.enemyType === "runner") return "enemy-ghoul";
-    if (this.enemyType === "brute") return "enemy-bloated";
+  private getEnemyTexture(type: EnemyType): string {
+    if (type === "runner") return "enemy-ghoul";
+    if (type === "brute") return "enemy-bloated";
     return "enemy-zombie";
   }
 
@@ -158,12 +175,12 @@ export class ArenaScene extends Phaser.Scene {
     { x: 2.5, y: 9.5, halfWidth: 0.35, halfHeight: 0.35 },
   ];
 
-  private enemyType: "normal" | "runner" | "brute" = "normal";
+  
 
   private playerHealth = 100;
   private playerMaxHealth = 100;
 
-  private dashHasHit = false;
+  
   private dashDamageMultiplier = 2;
 
   // HUD
@@ -175,7 +192,7 @@ export class ArenaScene extends Phaser.Scene {
   private abilityCooldownBar?: Phaser.GameObjects.Graphics;
   private gameOver = false;
 
-  private nextDamageTime = 0;
+  
   private readonly contactDamage = 10;
   private readonly damageCooldown = 800;
 
@@ -191,6 +208,8 @@ export class ArenaScene extends Phaser.Scene {
   // Progressão (primeiro, porque outros valores dependem dela)
   this.wave = 1;
   this.enemiesRemainingInWave = 3;
+  this.enemiesToSpawn = 3;
+  this.pendingSpawns = 0;
   this.spawnIndex = 0;
   this.totalEnemiesDefeated = 0;
 
@@ -205,7 +224,7 @@ export class ArenaScene extends Phaser.Scene {
   this.nextArrowTime = 0;
   this.nextFireballTime = 0;
   this.projectiles = [];
-  this.enemyMaxHealth = 3;
+  
 
   // Jogador
   this.worldX = 6;
@@ -220,19 +239,15 @@ export class ArenaScene extends Phaser.Scene {
   this.facingDirection = "south";
   this.isAttacking = false;
 
-// Inimigo
-  this.enemyX = 8;
-  this.enemyY = 6;
-  this.enemyType = "normal"; 
-  this.enemySpeed = 0.9;  
-  this.enemyHealth = this.enemyMaxHealth;
-  this.enemyAlive = true;
+  // Inimigos
+  this.enemies = [];
+  this.nextEnemyId = 0;
+  this.dashHitEnemies = new Set<number>();
 
   // Estado da partida
   this.gameOver = false;
   this.nextAttackTime = 0;
-  this.nextDamageTime = 0;
-  this.enemyAttackUntil = 0;
+  
 
   // Esquiva
   this.dodgeUntil = 0;
@@ -359,7 +374,7 @@ export class ArenaScene extends Phaser.Scene {
     this.createPixelLabEnemyAnimations("enemy-ghoul");
     this.createPixelLabEnemyAnimations("enemy-bloated");
     this.createPlayer();
-    this.createEnemy();
+    this.fillEnemies();
     this.createHUD();
     this.matchStartTime = Date.now();
     this.totalEnemiesDefeated = 0;
@@ -415,7 +430,7 @@ export class ArenaScene extends Phaser.Scene {
       0x9933ff,
       12
     );
-    this.dashHasHit = false;
+    this.dashHitEnemies.clear();
     this.dashDirX = Math.sign(this.facingX);
     this.dashDirY = Math.sign(this.facingY);
 
@@ -501,18 +516,21 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-    private checkDashDamage(): void {
+  private checkDashDamage(): void {
     if (this.time.now >= this.dashUntil) return;
-    if (this.dashHasHit || !this.enemyAlive) return;
 
-    const distance = Math.hypot(
-      this.enemyX - this.worldX,
-      this.enemyY - this.worldY,
-    );
+    for (const enemy of [...this.enemies]) {
+      if (!enemy.alive || this.dashHitEnemies.has(enemy.id)) continue;
 
-    if (distance <= 1) {
-      this.dashHasHit = true;
-      this.hitEnemy(this.playerDamage * this.dashDamageMultiplier);
+      const distance = Math.hypot(
+        enemy.x - this.worldX,
+        enemy.y - this.worldY,
+      );
+
+      if (distance <= 1) {
+        this.dashHitEnemies.add(enemy.id);
+        this.hitEnemy(enemy, this.playerDamage * this.dashDamageMultiplier);
+      }
     }
   }
 
@@ -1099,87 +1117,131 @@ private chooseUpgrade(option: UpgradeOption) {
     }
   }
 
-  private spawnEnemy() {
-  if (this.gameOver) return;
+  private getEnemyStats(type: EnemyType): { maxHealth: number; speed: number } {
+    if (type === "runner") {
+      return {
+        maxHealth: Math.max(2, 2 + Math.floor((this.wave - 1) / 2)),
+        speed: 1.5 + (this.wave - 1) * 0.05,
+      };
+    }
 
-  const spawnPoints = [
-    { x: 8, y: 6 },
-    { x: 9, y: 4 },
-    { x: 8, y: 9 },
-    { x: 3, y: 6 },
-    { x: 6, y: 10 },
-  ];
+    if (type === "brute") {
+      return {
+        maxHealth: 5 + (this.wave - 1) * 2,
+        speed: 0.55 + (this.wave - 1) * 0.03,
+      };
+    }
 
-  // Procura um ponto livre e afastado do jogador.
-  let selected = spawnPoints[this.spawnIndex % spawnPoints.length];
+    return {
+      maxHealth: 3 + (this.wave - 1) * 2,
+      speed: 0.9 + (this.wave - 1) * 0.03,
+    };
+  }
 
-  for (let i = 0; i < spawnPoints.length; i++) {
-    const index =
-      (this.spawnIndex + i) % spawnPoints.length;
+  private getEnemyColor(type: EnemyType): number {
+    if (type === "runner") return 0xf97316;
+    if (type === "brute") return 0xa855f7;
+    return 0xef4444;
+  }
 
-    const point = spawnPoints[index];
-
-    const distance = Math.hypot(
-      point.x - this.worldX,
-      point.y - this.worldY,
+  // Quantos inimigos podem estar vivos ao mesmo tempo nesta onda:
+  // começa com 2 e ganha +1 a cada 2 ondas, até o limite.
+  private getMaxConcurrentEnemies(): number {
+    return Math.min(
+      2 + Math.floor((this.wave - 1) / 2),
+      this.maxConcurrentEnemiesCap,
     );
+  }
 
-    if (
-      !this.collidesAt(point.x, point.y) &&
-      distance > 1.8
-    ) {
-      selected = point;
-      this.spawnIndex = index + 1;
-      break;
+  // Agenda o surgimento de inimigos até preencher o limite simultâneo.
+  private fillEnemies() {
+    if (this.gameOver) return;
+
+    const freeSlots =
+      this.getMaxConcurrentEnemies() -
+      this.enemies.length -
+      this.pendingSpawns;
+
+    const count = Math.min(freeSlots, this.enemiesToSpawn);
+
+    for (let i = 0; i < count; i++) {
+      this.enemiesToSpawn--;
+      this.pendingSpawns++;
+
+      // Pequeno intervalo entre cada um para não nascerem juntos.
+      this.time.delayedCall(i * 450, () => {
+        this.pendingSpawns--;
+        this.spawnEnemy();
+      });
     }
   }
 
-  const roll = Math.random();
+  private spawnEnemy() {
+    if (this.gameOver) return;
 
-if (this.wave >= 3 && roll < 0.25) {
-  this.enemyType = "brute";
-} else if (this.wave >= 2 && roll < 0.7) {
-  this.enemyType = "runner";
-} else {
-  this.enemyType = "normal";
-}
+    const spawnPoints = [
+      { x: 8, y: 6 },
+      { x: 9, y: 4 },
+      { x: 8, y: 9 },
+      { x: 3, y: 6 },
+      { x: 6, y: 10 },
+      { x: 10, y: 10 },
+      { x: 2, y: 2 },
+      { x: 10, y: 6 },
+    ];
 
-if (this.enemyType === "runner") {
-  this.enemyMaxHealth = Math.max(
-    2,
-    2 + Math.floor((this.wave - 1) / 2)
-  );
-  this.enemySpeed = 1.5 + (this.wave - 1) * 0.05;
-} else if (this.enemyType === "brute") {
-  this.enemyMaxHealth = 5 + (this.wave - 1) * 2;
-  this.enemySpeed = 0.55 + (this.wave - 1) * 0.03;
-} else {
-  this.enemyMaxHealth = 3 + (this.wave - 1) * 2;
-  this.enemySpeed = 0.9 + (this.wave - 1) * 0.03;
-}
+    // Procura um ponto livre, afastado do jogador e de outros inimigos.
+    let selected = spawnPoints[this.spawnIndex % spawnPoints.length];
 
-  this.enemyX = selected.x;
-  this.enemyY = selected.y;
-  this.enemyHealth = this.enemyMaxHealth;
-  this.enemyAlive = true;
+    for (let i = 0; i < spawnPoints.length; i++) {
+      const index =
+        (this.spawnIndex + i) % spawnPoints.length;
 
-  this.createEnemy();
-}
-  
-  
-    private createEnemy() {
-    const position = this.projectPosition(
-      this.enemyX,
-      this.enemyY,
-    );
+      const point = spawnPoints[index];
 
-    this.enemy = this.add.container(position.x, position.y);
+      const distance = Math.hypot(
+        point.x - this.worldX,
+        point.y - this.worldY,
+      );
 
-    const textureKey = this.getEnemyTexture();
+      const crowded = this.enemies.some(
+        (enemy) => Math.hypot(enemy.x - point.x, enemy.y - point.y) < 1,
+      );
+
+      if (
+        !this.collidesAt(point.x, point.y) &&
+        distance > 1.8 &&
+        !crowded
+      ) {
+        selected = point;
+        this.spawnIndex = index + 1;
+        break;
+      }
+    }
+
+    const roll = Math.random();
+    let type: EnemyType = "normal";
+
+    if (this.wave >= 3 && roll < 0.25) {
+      type = "brute";
+    } else if (this.wave >= 2 && roll < 0.7) {
+      type = "runner";
+    }
+
+    this.enemies.push(this.createEnemy(type, selected.x, selected.y));
+  }
+
+
+  private createEnemy(type: EnemyType, x: number, y: number): Enemy {
+    const position = this.projectPosition(x, y);
+    const stats = this.getEnemyStats(type);
+    const textureKey = this.getEnemyTexture(type);
+
+    const container = this.add.container(position.x, position.y);
 
     const shadow = this.add.ellipse(0, 2, 25, 12, 0x020617, 0.6);
 
-    this.enemySprite = this.add.sprite(0, 0, textureKey);
+    const sprite = this.add.sprite(0, 0, textureKey);
 
     const enemyOrigins: Record<string, number> = {
       "enemy-zombie": 53 / 64,
@@ -1187,92 +1249,103 @@ if (this.enemyType === "runner") {
       "enemy-bloated": 50 / 60,
     };
 
-    this.enemySprite.setOrigin(0.5, enemyOrigins[textureKey]);
-    this.enemySprite.setScale(textureKey === "enemy-bloated" ? 1.3 : 1);
-    this.enemyFacing = "south";
-    this.enemySprite.play(`${textureKey}-idle-south`);
-
-    this.enemy.add([shadow, this.enemySprite]);
+    sprite.setOrigin(0.5, enemyOrigins[textureKey]);
+    sprite.setScale(textureKey === "enemy-bloated" ? 1.3 : 1);
+    sprite.play(`${textureKey}-idle-south`);
 
     // Barra de vida acima da criatura.
-    this.enemyHealthBar = this.add.graphics();
-    this.enemy.add(this.enemyHealthBar);
+    const healthBar = this.add.graphics();
 
-    this.updateEnemyHealthBar();
-    this.enemy.setDepth(position.y);
+    container.add([shadow, sprite, healthBar]);
+    container.setDepth(position.y);
+
+    const enemy: Enemy = {
+      id: this.nextEnemyId++,
+      type,
+      x,
+      y,
+      health: stats.maxHealth,
+      maxHealth: stats.maxHealth,
+      speed: stats.speed,
+      alive: true,
+      facing: "south",
+      attackUntil: 0,
+      nextDamageTime: 0,
+      container,
+      sprite,
+      healthBar,
+    };
+
+    this.updateEnemyHealthBar(enemy);
+
+    return enemy;
   }
 
- private handleEnemyDefeated() {
-  this.enemyAlive = false;
+  private handleEnemyDefeated(enemy: Enemy) {
+    enemy.alive = false;
+    this.enemies = this.enemies.filter((other) => other !== enemy);
 
-  const enemyColor =
-    this.enemyType === "runner"
-      ? 0xf97316
-      : this.enemyType === "brute"
-        ? 0xa855f7
-        : 0xef4444;
-        
-  this.createEnemyDeathEffect(
-  this.enemy.x,
-  this.enemy.y,
-  enemyColor,
-  );
-  this.createHitEffect(
-  this.enemyX,
-  this.enemyY,
-  0xc4b5fd
-  );
-  this.enemy.destroy();
+    this.createEnemyDeathEffect(
+      enemy.container.x,
+      enemy.container.y,
+      this.getEnemyColor(enemy.type),
+    );
+    this.createHitEffect(
+      enemy.x,
+      enemy.y,
+      0xc4b5fd
+    );
+    enemy.container.destroy();
 
-  this.gainXP(1);
-  this.totalEnemiesDefeated++;
-  this.enemiesRemainingInWave -= 1;
-  this.updateHUD();
-
-  this.time.delayedCall(800, () => {
-    if (this.gameOver) return;
-
-    if (this.enemiesRemainingInWave > 0) {
-      // Ainda existem inimigos nesta onda.
-      this.spawnEnemy();
-      return;
-    }
-
-    // Onda concluída: aumenta a dificuldade.
-    this.wave += 1;
-
-    this.enemiesRemainingInWave = 3 + (this.wave - 1);
-    
-
+    this.gainXP(1);
+    this.totalEnemiesDefeated++;
+    this.enemiesRemainingInWave -= 1;
     this.updateHUD();
-    this.spawnEnemy();
-  });
-}
 
-  private updateEnemyHealthBar() {
-    this.enemyHealthBar.clear();
-  
+    this.time.delayedCall(800, () => {
+      if (this.gameOver) return;
+
+      if (this.enemiesRemainingInWave > 0) {
+        // Ainda existem inimigos nesta onda: repõe os que faltam.
+        this.fillEnemies();
+        return;
+      }
+
+      // Onda concluída: aumenta a dificuldade.
+      this.wave += 1;
+
+      this.enemiesRemainingInWave = 3 + (this.wave - 1);
+      this.enemiesToSpawn = this.enemiesRemainingInWave;
+
+      this.updateHUD();
+      this.fillEnemies();
+    });
+  }
+
+  private updateEnemyHealthBar(enemy: Enemy) {
+    enemy.healthBar.clear();
+
     const barY =
-      this.enemyType === "runner"
+      enemy.type === "runner"
         ? -56
-        : this.enemyType === "brute"
+        : enemy.type === "brute"
           ? -60
           : -52;
     const barWidth = 30;
     const barHeight = 4;
     const healthRatio =
-      this.enemyHealth / this.enemyMaxHealth;
-  
-    this.enemyHealthBar.fillStyle(0x450a0a, 1);
-    this.enemyHealthBar.fillRect(
+      Math.max(0, enemy.health) / enemy.maxHealth;
+
+    enemy.healthBar.fillStyle(0x450a0a, 1);
+    enemy.healthBar.fillRect(
       -barWidth / 2,
       barY,
       barWidth,
       barHeight,
     );
-  
-    this.enemyHealthBar.fillStyle(0xef4444, 1);
-    this.enemyHealthBar.fillRect(
+
+    enemy.healthBar.fillStyle(0xef4444, 1);
+    enemy.healthBar.fillRect(
       -barWidth / 2,
       barY,
       barWidth * healthRatio,
@@ -1329,125 +1402,152 @@ if (this.enemyType === "runner") {
 
 
 
-  private updateEnemy(delta: number) {
-  if (!this.enemyAlive) return;
-
-  const dx = this.worldX - this.enemyX;
-  const dy = this.worldY - this.enemyY;
-
-  const distance = Math.hypot(dx, dy);
-
-  // Mantém uma pequena distância do jogador.
-  if (distance > 0.7) {
-    const movement =
-      this.enemySpeed * (delta / 1000);
-
-    const nextX = this.enemyX +
-      (dx / distance) * movement;
-
-    const nextY = this.enemyY +
-      (dy / distance) * movement;
-
-    // Evita que a criatura atravesse as pedras.
-    if (!this.collidesAt(nextX, this.enemyY)) {
-      this.enemyX = Phaser.Math.Clamp(
-        nextX, 0.2, 11.8,
-      );
-    }
-
-    if (!this.collidesAt(this.enemyX, nextY)) {
-      this.enemyY = Phaser.Math.Clamp(
-        nextY, 0.2, 11.8,
-      );
+  private updateEnemies(delta: number) {
+    for (const enemy of this.enemies) {
+      this.updateEnemy(enemy, delta);
     }
   }
 
+  private updateEnemy(enemy: Enemy, delta: number) {
+    if (!enemy.alive) return;
+
+    const dx = this.worldX - enemy.x;
+    const dy = this.worldY - enemy.y;
+
+    const distance = Math.hypot(dx, dy);
+
+    // Separação: empurra o inimigo para longe dos vizinhos,
+    // para que não fiquem todos empilhados no mesmo ponto.
+    const separationRadius = 0.6;
+    let pushX = 0;
+    let pushY = 0;
+
+    for (const other of this.enemies) {
+      if (other === enemy || !other.alive) continue;
+
+      const ox = enemy.x - other.x;
+      const oy = enemy.y - other.y;
+      const otherDistance = Math.hypot(ox, oy);
+
+      if (otherDistance > 0 && otherDistance < separationRadius) {
+        const strength =
+          (separationRadius - otherDistance) / separationRadius;
+
+        pushX += (ox / otherDistance) * strength;
+        pushY += (oy / otherDistance) * strength;
+      }
+    }
+
+    // Mantém uma pequena distância do jogador.
     const isMoving = distance > 0.7;
 
+    let moveX = pushX * 1.2;
+    let moveY = pushY * 1.2;
+
+    if (isMoving) {
+      moveX += dx / distance;
+      moveY += dy / distance;
+    }
+
+    const moveLength = Math.hypot(moveX, moveY);
+
+    if (moveLength > 0.0001) {
+      const strength = isMoving ? 1 : Math.min(1, moveLength);
+      const movement = enemy.speed * (delta / 1000) * strength;
+
+      const nextX = enemy.x + (moveX / moveLength) * movement;
+      const nextY = enemy.y + (moveY / moveLength) * movement;
+
+      // Evita que a criatura atravesse as pedras.
+      if (!this.collidesAt(nextX, enemy.y)) {
+        enemy.x = Phaser.Math.Clamp(nextX, 0.2, 11.8);
+      }
+
+      if (!this.collidesAt(enemy.x, nextY)) {
+        enemy.y = Phaser.Math.Clamp(nextY, 0.2, 11.8);
+      }
+    }
+
     if (Math.abs(dx) > Math.abs(dy)) {
-      this.enemyFacing = dx > 0 ? "east" : "west";
+      enemy.facing = dx > 0 ? "east" : "west";
     } else {
-      this.enemyFacing = dy > 0 ? "south" : "north";
+      enemy.facing = dy > 0 ? "south" : "north";
     }
 
     const enemyKey =
-      `${this.getEnemyTexture()}-${isMoving ? "walk" : "idle"}-${this.enemyFacing}`;
+      `${this.getEnemyTexture(enemy.type)}-${isMoving ? "walk" : "idle"}-${enemy.facing}`;
 
-       if (
-      this.time.now >= this.enemyAttackUntil &&
-      this.enemySprite.anims.currentAnim?.key !== enemyKey
+    if (
+      this.time.now >= enemy.attackUntil &&
+      enemy.sprite.anims.currentAnim?.key !== enemyKey
     ) {
-      this.enemySprite.play(enemyKey);
+      enemy.sprite.play(enemyKey);
     }
 
-  const position = this.projectPosition(
-    this.enemyX,
-    this.enemyY,
-  );
+    const position = this.projectPosition(
+      enemy.x,
+      enemy.y,
+    );
 
-  this.enemy.setPosition(position.x, position.y);
-  this.enemy.setDepth(position.y);
- }
-
-private damageEnemy() {
-  if (!this.enemyAlive) return;
-
-  const dx = this.enemyX - this.worldX;
-  const dy = this.enemyY - this.worldY;
-  const distance = Math.hypot(dx, dy);
-
-  if (distance === 0 || distance > 1.35) {
-    return;
+    enemy.container.setPosition(position.x, position.y);
+    enemy.container.setDepth(position.y);
   }
 
-  // Normaliza a direção para funcionar na diagonal.
-  const facingLength = Math.hypot(this.facingX, this.facingY);
-  const facingX = this.facingX / facingLength;
-  const facingY = this.facingY / facingLength;
+  // Golpe corpo a corpo: atinge todos os inimigos à frente, dentro do alcance.
+  private damageEnemies() {
+    const facingLength = Math.hypot(this.facingX, this.facingY);
+    const facingX = this.facingX / facingLength;
+    const facingY = this.facingY / facingLength;
 
-  // Só acerta se o inimigo estiver à frente.
-  const dot = (dx / distance) * facingX + (dy / distance) * facingY;
+    for (const enemy of [...this.enemies]) {
+      if (!enemy.alive) continue;
 
-  if (dot < 0.5) return;
+      const dx = enemy.x - this.worldX;
+      const dy = enemy.y - this.worldY;
+      const distance = Math.hypot(dx, dy);
 
-  this.hitEnemy(this.playerDamage);
-  this.healPlayer(this.lifeStealPerHit);
-}
+      if (distance === 0 || distance > 1.35) continue;
 
-// Aplica dano ao inimigo (golpe, flecha ou bola de fogo).
-private hitEnemy(amount: number) {
-  if (!this.enemyAlive) return;
+      // Só acerta se o inimigo estiver à frente.
+      const dot = (dx / distance) * facingX + (dy / distance) * facingY;
 
-  this.enemyHealth -= amount;
-  this.playSfx("hit", 0.6);
+      if (dot < 0.5) continue;
 
-  this.showDamageNumber(this.enemy.x, this.enemy.y, amount);
-
-  this.createHitEffect(
-    this.enemyX,
-    this.enemyY,
-    this.enemyType === "runner"
-      ? 0xf97316
-      : this.enemyType === "brute"
-        ? 0xa855f7
-        : 0xef4444,
-  );
-
-  this.updateEnemyHealthBar();
-
-  // Efeito visual de dano.
-  this.enemy.setAlpha(0.35);
-
-  this.time.delayedCall(100, () => {
-    if (this.enemyAlive && this.enemy.active) {
-      this.enemy.setAlpha(1);
+      this.hitEnemy(enemy, this.playerDamage);
+      this.healPlayer(this.lifeStealPerHit);
     }
-  });
-
-  if (this.enemyHealth <= 0) {
-    this.handleEnemyDefeated();
   }
-}
+
+  // Aplica dano a um inimigo (golpe, flecha, bola de fogo, dash ou explosão).
+  private hitEnemy(enemy: Enemy, amount: number) {
+    if (!enemy.alive) return;
+
+    enemy.health -= amount;
+    this.playSfx("hit", 0.6);
+
+    this.showDamageNumber(enemy.container.x, enemy.container.y, amount);
+
+    this.createHitEffect(
+      enemy.x,
+      enemy.y,
+      this.getEnemyColor(enemy.type),
+    );
+
+    this.updateEnemyHealthBar(enemy);
+
+    // Efeito visual de dano.
+    enemy.container.setAlpha(0.35);
+
+    this.time.delayedCall(100, () => {
+      if (enemy.alive && enemy.container.active) {
+        enemy.container.setAlpha(1);
+      }
+    });
+
+    if (enemy.health <= 0) {
+      this.handleEnemyDefeated(enemy);
+    }
+  }
 
 private healPlayer(amount: number) {
   if (amount <= 0 || this.gameOver) return;
@@ -1540,15 +1640,20 @@ private healPlayer(amount: number) {
       onComplete: () => explosion.destroy(),
     });
 
-    if (!this.enemyAlive) return;
+    for (const enemy of [...this.enemies]) {
+      if (!enemy.alive) continue;
 
-    const distance = Math.hypot(
-      this.enemyX - this.worldX,
-      this.enemyY - this.worldY,
-    );
+      const distance = Math.hypot(
+        enemy.x - this.worldX,
+        enemy.y - this.worldY,
+      );
 
-    if (distance <= this.mageExplosionRadius) {
-      this.hitEnemy(this.playerDamage * this.mageExplosionDamageMultiplier);
+      if (distance <= this.mageExplosionRadius) {
+        this.hitEnemy(
+          enemy,
+          this.playerDamage * this.mageExplosionDamageMultiplier,
+        );
+      }
     }
   }
   
@@ -1684,7 +1789,7 @@ private createHitEffect(
     );
 
     slash.strokePath();
-    this.damageEnemy();
+    this.damageEnemies();
     slash.setDepth(position.y + 1);
 
     slash.setDepth(1000);
@@ -1862,43 +1967,49 @@ private createLevelUpEffect() {
 }
 
 
-private takeDamage() {
-  if (this.gameOver || !this.enemyAlive) {
-    return;
-  }
+  private takeDamage() {
+    if (this.gameOver || this.enemies.length === 0) {
+      return;
+    }
 
-  // Ignora o dano enquanto o jogador estiver invulnerável.
-  if (this.time.now < this.invulnerableUntil) {
-    return;
-  }
+    // Ignora o dano enquanto o jogador estiver invulnerável.
+    if (this.time.now < this.invulnerableUntil) {
+      return;
+    }
 
-  const distance = Phaser.Math.Distance.Between(
-    this.worldX,
-    this.worldY,
-    this.enemyX,
-    this.enemyY,
-  );
+    // Cada inimigo próximo ataca com o seu próprio tempo de recarga.
+    let hits = 0;
 
-  // O inimigo precisa chegar perto do jogador.
-  if (distance > 0.9) {
-    return;
-  }
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
 
-  // Impede dano contínuo a cada frame.
-  if (this.time.now < this.nextDamageTime) {
-    return;
-  }
+      const distance = Phaser.Math.Distance.Between(
+        this.worldX,
+        this.worldY,
+        enemy.x,
+        enemy.y,
+      );
 
-  this.nextDamageTime =
-    this.time.now + this.damageCooldown;
-  
-  this.playEnemyAttack();
-  
+      // O inimigo precisa chegar perto do jogador.
+      if (distance > 0.9) continue;
+
+      // Impede dano contínuo a cada frame.
+      if (this.time.now < enemy.nextDamageTime) continue;
+
+      enemy.nextDamageTime = this.time.now + this.damageCooldown;
+      this.playEnemyAttack(enemy);
+      hits++;
+    }
+
+    if (hits === 0) return;
+
     const shieldIsActive = this.time.now < this.shieldActiveUntil;
 
-    const finalDamage = shieldIsActive
+    const damagePerHit = shieldIsActive
       ? Math.ceil(this.contactDamage * (1 - this.shieldDamageReduction))
       : this.contactDamage;
+
+    const finalDamage = damagePerHit * hits;
 
   this.playerHealth = Math.max(
     0,
@@ -1975,7 +2086,7 @@ private updateRegeneration(delta: number) {
 }
 
 private updateAutoWeapons() {
-  if (!this.enemyAlive) return;
+    if (this.enemies.length === 0) return;
 
   const now = this.time.now;
 
@@ -2000,9 +2111,35 @@ private updateAutoWeapons() {
   }
 }
 
-private fireProjectile(kind: "arrow" | "fireball", damage: number) {
-  const dx = this.enemyX - this.worldX;
-  const dy = this.enemyY - this.worldY;
+// Inimigo vivo mais próximo do jogador (alvo das armas automáticas).
+  private getNearestEnemy(): Enemy | undefined {
+    let nearest: Enemy | undefined;
+    let bestDistance = Infinity;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+
+      const distance = Math.hypot(
+        enemy.x - this.worldX,
+        enemy.y - this.worldY,
+      );
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        nearest = enemy;
+      }
+    }
+
+    return nearest;
+  }
+
+  private fireProjectile(kind: "arrow" | "fireball", damage: number) {
+    const target = this.getNearestEnemy();
+
+    if (!target) return;
+
+    const dx = target.x - this.worldX;
+    const dy = target.y - this.worldY;
   const distance = Math.hypot(dx, dy);
 
   if (distance === 0) return;
@@ -2045,13 +2182,13 @@ private positionProjectile(projectile: Projectile) {
   projectile.shape.setDepth(position.y + 50);
 }
 
-  private playEnemyAttack() {
-    if (!this.enemySprite || !this.enemySprite.active) return;
+  private playEnemyAttack(enemy: Enemy) {
+    if (!enemy.sprite || !enemy.sprite.active) return;
 
-    this.enemyAttackUntil = this.time.now + 500;
+    enemy.attackUntil = this.time.now + 500;
 
-    this.enemySprite.play(
-      `${this.getEnemyTexture()}-attack-${this.enemyFacing}`
+    enemy.sprite.play(
+      `${this.getEnemyTexture(enemy.type)}-attack-${enemy.facing}`
     );
   }
 
@@ -2072,13 +2209,17 @@ private updateProjectiles(delta: number) {
       projectile.y < 0 ||
       projectile.y > 12;
 
-    if (
-      !remove &&
-      this.enemyAlive &&
-      Math.hypot(this.enemyX - projectile.x, this.enemyY - projectile.y) < 0.5
-    ) {
-      this.hitEnemy(projectile.damage);
-      remove = true;
+    if (!remove) {
+      const target = this.enemies.find(
+        (enemy) =>
+          enemy.alive &&
+          Math.hypot(enemy.x - projectile.x, enemy.y - projectile.y) < 0.5,
+      );
+
+      if (target) {
+        this.hitEnemy(target, projectile.damage);
+        remove = true;
+      }
     }
 
     if (remove) {
@@ -2376,7 +2517,7 @@ private createAbilityParticles(
       this.playHeroAnimation(isMoving ? "walk" : "idle");
     }
 
-    this.updateEnemy(delta);
+    this.updateEnemies(delta);
     this.takeDamage();
 
     if (this.gameOver) {
