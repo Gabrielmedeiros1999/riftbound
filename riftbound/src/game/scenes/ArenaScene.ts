@@ -86,8 +86,12 @@ export class ArenaScene extends Phaser.Scene {
   private heroTexture = "hero";
 
   // Posição lógica do personagem na arena.
-  private worldX = 6;
-  private worldY = 6;
+  // Tamanho da arena em tiles (arena quadrada: arenaSize x arenaSize).
+  // Era 12. Altere este valor para aumentar ou diminuir o mapa.
+  private readonly arenaSize = 20;
+
+  private worldX = this.arenaSize / 2;
+  private worldY = this.arenaSize / 2;
   private speed = 3;
 
   // Dimensões de cada losango isométrico.
@@ -131,7 +135,7 @@ export class ArenaScene extends Phaser.Scene {
   // Ondas e progressão
   private wave = 1;
   private enemiesRemainingInWave = 3;
-  private spawnIndex = 0;
+  
 
   private xp = 0;
   private level = 1;
@@ -167,12 +171,29 @@ export class ArenaScene extends Phaser.Scene {
   private isAttacking = false;
 
   private readonly obstacles = [
-    { x: 3.5, y: 3.5, halfWidth: 0.35, halfHeight: 0.35 },
-    { x: 4.5, y: 7.5, halfWidth: 0.35, halfHeight: 0.35 },
-    { x: 8.5, y: 3.5, halfWidth: 0.35, halfHeight: 0.35 },
+    // Perto do centro
     { x: 9.5, y: 8.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 12.5, y: 6.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 10.5, y: 13.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 6.5, y: 10.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 13.5, y: 11.5, halfWidth: 0.35, halfHeight: 0.35 },
+    // Região noroeste
+    { x: 3.5, y: 3.5, halfWidth: 0.35, halfHeight: 0.35 },
     { x: 6.5, y: 2.5, halfWidth: 0.35, halfHeight: 0.35 },
-    { x: 2.5, y: 9.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 8.5, y: 4.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 4.5, y: 7.5, halfWidth: 0.35, halfHeight: 0.35 },
+    // Região nordeste
+    { x: 14.5, y: 3.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 17.5, y: 5.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 16.5, y: 9.5, halfWidth: 0.35, halfHeight: 0.35 },
+    // Região sudoeste
+    { x: 2.5, y: 12.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 5.5, y: 15.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 8.5, y: 17.5, halfWidth: 0.35, halfHeight: 0.35 },
+    // Região sudeste
+    { x: 14.5, y: 15.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 17.5, y: 13.5, halfWidth: 0.35, halfHeight: 0.35 },
+    { x: 12.5, y: 17.5, halfWidth: 0.35, halfHeight: 0.35 },
   ];
 
   
@@ -210,7 +231,7 @@ export class ArenaScene extends Phaser.Scene {
   this.enemiesRemainingInWave = 3;
   this.enemiesToSpawn = 3;
   this.pendingSpawns = 0;
-  this.spawnIndex = 0;
+  
   this.totalEnemiesDefeated = 0;
 
   this.xp = 0;
@@ -227,8 +248,8 @@ export class ArenaScene extends Phaser.Scene {
   
 
   // Jogador
-  this.worldX = 6;
-  this.worldY = 6;
+  this.worldX = this.arenaSize / 2;
+  this.worldY = this.arenaSize / 2;
   this.facingX = 1;
   this.facingY = 0;
   this.speed = 3;
@@ -374,6 +395,7 @@ export class ArenaScene extends Phaser.Scene {
     this.createPixelLabEnemyAnimations("enemy-ghoul");
     this.createPixelLabEnemyAnimations("enemy-bloated");
     this.createPlayer();
+    this.setupCamera();
     this.fillEnemies();
     this.createHUD();
     this.matchStartTime = Date.now();
@@ -825,9 +847,13 @@ private createHeroAnimations() {
 private createRiftDecorations() {
   const rifts = [
     { x: 2, y: 3 },
-    { x: 10, y: 3 },
-    { x: 3, y: 9 },
-    { x: 9, y: 10 },
+    { x: 16, y: 2 },
+    { x: 11, y: 4 },
+    { x: 3, y: 10 },
+    { x: 17, y: 11 },
+    { x: 9, y: 15 },
+    { x: 3, y: 17 },
+    { x: 16, y: 17 },
   ];
 
   for (const rift of rifts) {
@@ -1065,8 +1091,8 @@ private chooseUpgrade(option: UpgradeOption) {
       "terrain-grass",
     ];
 
-    for (let x = 0; x < 12; x++) {
-      for (let y = 0; y < 12; y++) {
+    for (let x = 0; x < this.arenaSize; x++) {
+      for (let y = 0; y < this.arenaSize; y++) {
         const center = this.projectPosition(x + 0.5, y + 0.5);
 
         // Sorteio fixo por tile (sempre o mesmo a cada partida).
@@ -1179,44 +1205,54 @@ private chooseUpgrade(option: UpgradeOption) {
   private spawnEnemy() {
     if (this.gameOver) return;
 
-    const spawnPoints = [
-      { x: 8, y: 6 },
-      { x: 9, y: 4 },
-      { x: 8, y: 9 },
-      { x: 3, y: 6 },
-      { x: 6, y: 10 },
-      { x: 10, y: 10 },
-      { x: 2, y: 2 },
-      { x: 10, y: 6 },
-    ];
+    const margin = 0.8;
+    const max = this.arenaSize - margin;
 
-    // Procura um ponto livre, afastado do jogador e de outros inimigos.
-    let selected = spawnPoints[this.spawnIndex % spawnPoints.length];
+    let spawnX = 0;
+    let spawnY = 0;
+    let found = false;
 
-    for (let i = 0; i < spawnPoints.length; i++) {
-      const index =
-        (this.spawnIndex + i) % spawnPoints.length;
+    // Sorteia um ponto livre a uma distância média do jogador:
+    // nem em cima dele, nem tão longe a ponto de demorar para chegar.
+    for (let attempt = 0; attempt < 40 && !found; attempt++) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const distance = Phaser.Math.FloatBetween(3.5, 7);
 
-      const point = spawnPoints[index];
+      const x = this.worldX + Math.cos(angle) * distance;
+      const y = this.worldY + Math.sin(angle) * distance;
 
-      const distance = Math.hypot(
-        point.x - this.worldX,
-        point.y - this.worldY,
-      );
+      if (x < margin || y < margin || x > max || y > max) continue;
+      if (this.collidesAt(x, y)) continue;
 
       const crowded = this.enemies.some(
-        (enemy) => Math.hypot(enemy.x - point.x, enemy.y - point.y) < 1,
+        (enemy) => Math.hypot(enemy.x - x, enemy.y - y) < 1.2,
       );
 
-      if (
-        !this.collidesAt(point.x, point.y) &&
-        distance > 1.8 &&
-        !crowded
-      ) {
-        selected = point;
-        this.spawnIndex = index + 1;
-        break;
-      }
+      if (crowded) continue;
+
+      spawnX = x;
+      spawnY = y;
+      found = true;
+    }
+
+    // Plano B: o canto da arena mais distante do jogador.
+    if (!found) {
+      const corners = [
+        { x: margin, y: margin },
+        { x: max, y: margin },
+        { x: margin, y: max },
+        { x: max, y: max },
+      ];
+
+      const farthest = corners.reduce((best, corner) =>
+        Math.hypot(corner.x - this.worldX, corner.y - this.worldY) >
+        Math.hypot(best.x - this.worldX, best.y - this.worldY)
+          ? corner
+          : best,
+      );
+
+      spawnX = farthest.x;
+      spawnY = farthest.y;
     }
 
     const roll = Math.random();
@@ -1228,7 +1264,7 @@ private chooseUpgrade(option: UpgradeOption) {
       type = "runner";
     }
 
-    this.enemies.push(this.createEnemy(type, selected.x, selected.y));
+    this.enemies.push(this.createEnemy(type, spawnX, spawnY));
   }
 
 
@@ -1460,11 +1496,11 @@ private chooseUpgrade(option: UpgradeOption) {
 
       // Evita que a criatura atravesse as pedras.
       if (!this.collidesAt(nextX, enemy.y)) {
-        enemy.x = Phaser.Math.Clamp(nextX, 0.2, 11.8);
+        enemy.x = Phaser.Math.Clamp(nextX, 0.2, this.arenaSize - 0.2);
       }
 
       if (!this.collidesAt(enemy.x, nextY)) {
-        enemy.y = Phaser.Math.Clamp(nextY, 0.2, 11.8);
+        enemy.y = Phaser.Math.Clamp(nextY, 0.2, this.arenaSize - 0.2);
       }
     }
 
@@ -1560,6 +1596,21 @@ private healPlayer(amount: number) {
   this.updateHUD();
 }
 
+
+  // A arena é maior que a tela: a câmera segue o jogador
+  // e fica limitada às bordas do mapa.
+  private setupCamera() {
+    const halfWidth = (this.arenaSize * this.tileWidth) / 2;
+    const originX = this.scale.width / 2;
+
+    const left = originX - halfWidth - 120;
+    const top = 80 - 140; // folga extra no topo por causa do painel do HUD
+    const right = originX + halfWidth + 120;
+    const bottom = 80 + this.arenaSize * this.tileHeight + 100;
+
+    this.cameras.main.setBounds(left, top, right - left, bottom - top);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+  }
 
   private createPlayer() {
     const position = this.projectPosition(
@@ -2205,9 +2256,9 @@ private updateProjectiles(delta: number) {
     let remove =
       this.time.now > projectile.expiresAt ||
       projectile.x < 0 ||
-      projectile.x > 12 ||
+      projectile.x > this.arenaSize ||
       projectile.y < 0 ||
-      projectile.y > 12;
+      projectile.y > this.arenaSize;
 
     if (!remove) {
       const target = this.enemies.find(
@@ -2475,13 +2526,13 @@ private createAbilityParticles(
     const nextX = Phaser.Math.Clamp(
     this.worldX + dx * movement,
     0.2,
-    11.8,
+    this.arenaSize - 0.2,
     );
 
     const nextY = Phaser.Math.Clamp(
     this.worldY + dy * movement,
     0.2,
-    11.8,
+    this.arenaSize - 0.2,
     );
 
     // Tenta movimentar no eixo X.
