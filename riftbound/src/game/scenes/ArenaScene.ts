@@ -22,7 +22,7 @@ type Projectile = {
   damage: number;
   expiresAt: number;
 };
-type EnemyType = "normal" | "runner" | "brute";
+type EnemyType = "normal" | "runner" | "brute" | "spitter" | "bomber";
 
 type Enemy = {
   id: number;
@@ -36,9 +36,25 @@ type Enemy = {
   facing: "south" | "north" | "east" | "west";
   attackUntil: number;
   nextDamageTime: number;
+  // Cuspidor: quando pode atirar de novo.
+  nextShotTime: number;
+  // Bomba: instante em que explode (0 = pavio apagado).
+  fuseUntil: number;
   container: Phaser.GameObjects.Container;
   sprite: Phaser.GameObjects.Sprite;
   healthBar: Phaser.GameObjects.Graphics;
+};
+
+// Projétil disparado por um inimigo (cuspidor).
+type EnemyProjectile = {
+  shape: Phaser.GameObjects.Arc;
+  x: number;
+  y: number;
+  dirX: number;
+  dirY: number;
+  speed: number;
+  damage: number;
+  expiresAt: number;
 };
 
 type XpGem = {
@@ -125,11 +141,22 @@ export class ArenaScene extends Phaser.Scene {
   private nextEnemyId = 0;
 
   // Inimigos da onda que ainda não foram criados.
-  private enemiesToSpawn = 3;
+  private enemiesToSpawn = 8;
   // Inimigos já agendados para aparecer (evita passar do limite).
   private pendingSpawns = 0;
   // Limite máximo de inimigos simultâneos, em qualquer onda.
-  private readonly maxConcurrentEnemiesCap = 5;
+  private readonly maxConcurrentEnemiesCap = 14;
+
+  // Projéteis inimigos (cuspidor).
+  private enemyProjectiles: EnemyProjectile[] = [];
+  private readonly spitterProjectileSpeed = 4.5; // tiles/s (dá para desviar)
+  private readonly spitterProjectileDamage = 8;
+
+  // Bomba: pavio, raio e dano da explosão.
+  private readonly bomberFuseTime = 600; // ms entre chegar perto e explodir
+  private readonly bomberBlastRadius = 1.6; // tiles
+  private readonly bomberBlastDamage = 12; // dano no jogador
+  private readonly bomberBlastEnemyDamage = 4; // dano nos outros inimigos (reação em cadeia)
 
   // Gemas de XP no chão (dropadas pelos inimigos ao morrer).
   private xpGems: XpGem[] = [];
@@ -157,7 +184,7 @@ export class ArenaScene extends Phaser.Scene {
 
   private getEnemyTexture(type: EnemyType): string {
     if (type === "runner") return "enemy-ghoul";
-    if (type === "brute") return "enemy-bloated";
+    if (type === "brute" || type === "bomber") return "enemy-bloated";
     return "enemy-zombie";
   }
 
@@ -168,7 +195,7 @@ export class ArenaScene extends Phaser.Scene {
 
   // Ondas e progressão
   private wave = 1;
-  private enemiesRemainingInWave = 3;
+  private enemiesRemainingInWave = 8;
   
 
   private xp = 0;
@@ -262,10 +289,11 @@ export class ArenaScene extends Phaser.Scene {
   init() {
   // Progressão (primeiro, porque outros valores dependem dela)
   this.wave = 1;
-  this.enemiesRemainingInWave = 3;
-  this.enemiesToSpawn = 3;
+  this.enemiesRemainingInWave = this.getWaveEnemyCount(1);
+  this.enemiesToSpawn = this.getWaveEnemyCount(1);
   this.pendingSpawns = 0;
   this.xpGems = [];
+  this.enemyProjectiles = [];
   this.gemMagnetRadius = 1.6;
   this.hitStopUntil = 0;
   this.nextHitStopTime = 0;
@@ -1196,40 +1224,104 @@ private chooseUpgrade(option: UpgradeOption) {
     }
   }
 
+  // Vida e velocidade. A vida cresce DEVAGAR com as ondas: a dificuldade vem
+  // principalmente da quantidade e da variedade de inimigos, não de "esponjas".
   private getEnemyStats(type: EnemyType): { maxHealth: number; speed: number } {
-    if (type === "runner") {
-      return {
-        maxHealth: Math.max(2, 2 + Math.floor((this.wave - 1) / 2)),
-        speed: 1.5 + (this.wave - 1) * 0.05,
-      };
-    }
+    const w = this.wave - 1;
 
-    if (type === "brute") {
-      return {
-        maxHealth: 5 + (this.wave - 1) * 2,
-        speed: 0.55 + (this.wave - 1) * 0.03,
-      };
+    switch (type) {
+      case "runner":
+        return {
+          maxHealth: 2 + Math.floor(w / 3),
+          speed: Math.min(1.5 + w * 0.05, 2.4),
+        };
+      case "brute":
+        return {
+          maxHealth: 6 + w,
+          speed: Math.min(0.55 + w * 0.03, 1.0),
+        };
+      case "spitter":
+        return {
+          maxHealth: 2 + Math.floor(w / 3),
+          speed: Math.min(0.8 + w * 0.02, 1.1),
+        };
+      case "bomber":
+        return {
+          maxHealth: 2 + Math.floor(w / 3),
+          speed: Math.min(1.25 + w * 0.04, 1.9),
+        };
+      default:
+        return {
+          maxHealth: 3 + Math.floor(w / 2),
+          speed: Math.min(0.9 + w * 0.03, 1.6),
+        };
     }
-
-    return {
-      maxHealth: 3 + (this.wave - 1) * 2,
-      speed: 0.9 + (this.wave - 1) * 0.03,
-    };
   }
 
   private getEnemyColor(type: EnemyType): number {
     if (type === "runner") return 0xf97316;
     if (type === "brute") return 0xa855f7;
+    if (type === "spitter") return 0x38bdf8;
+    if (type === "bomber") return 0xfb923c;
     return 0xef4444;
   }
 
-  // Quantos inimigos podem estar vivos ao mesmo tempo nesta onda:
-  // começa com 2 e ganha +1 a cada 2 ondas, até o limite.
+  // Cor aplicada ao sprite (0xffffff = cores originais).
+  // Cuspidor e bomba reaproveitam sprites existentes, distinguidos pela cor.
+  private getEnemyTint(type: EnemyType): number {
+    if (type === "spitter") return 0x7dd3fc;
+    if (type === "bomber") return 0xfb923c;
+    return 0xffffff;
+  }
+
+  // Dano por contato de cada tipo (a base é contactDamage).
+  // Como agora há muito mais inimigos ao mesmo tempo, cada um bate mais fraco.
+  private getContactDamage(type: EnemyType): number {
+    switch (type) {
+      case "brute":
+        return this.contactDamage;
+      case "runner":
+      case "spitter":
+        return Math.round(this.contactDamage * 0.4);
+      case "bomber":
+        return 0; // o perigo da bomba é a explosão
+      default:
+        return Math.round(this.contactDamage * 0.5);
+    }
+  }
+
+  // Quantos inimigos tem cada onda: 8, 12, 16, 20...
+  private getWaveEnemyCount(wave: number): number {
+    return 8 + 4 * (wave - 1);
+  }
+
+  // Sorteia o tipo do próximo inimigo. Tipos novos entram conforme as ondas
+  // avançam e o "normal" vai perdendo espaço, aumentando a variedade.
+  private pickEnemyType(): EnemyType {
+    const w = this.wave;
+
+    const weights: [EnemyType, number][] = [["normal", 10]];
+
+    if (w >= 2) weights.push(["runner", Math.min(2 + w, 6)]);
+    if (w >= 3) weights.push(["spitter", Math.min(1 + w, 5)]);
+    if (w >= 3) weights.push(["brute", Math.min(w - 1, 4)]);
+    if (w >= 4) weights.push(["bomber", Math.min(w, 5)]);
+
+    const total = weights.reduce((sum, [, weight]) => sum + weight, 0);
+    let roll = Math.random() * total;
+
+    for (const [type, weight] of weights) {
+      roll -= weight;
+      if (roll < 0) return type;
+    }
+
+    return "normal";
+  }
+
+  // Quantos inimigos podem estar vivos ao mesmo tempo:
+  // 4 na onda 1, +1 por onda, até o limite.
   private getMaxConcurrentEnemies(): number {
-    return Math.min(
-      2 + Math.floor((this.wave - 1) / 2),
-      this.maxConcurrentEnemiesCap,
-    );
+    return Math.min(3 + this.wave, this.maxConcurrentEnemiesCap);
   }
 
   // Agenda o surgimento de inimigos até preencher o limite simultâneo.
@@ -1308,16 +1400,9 @@ private chooseUpgrade(option: UpgradeOption) {
       spawnY = farthest.y;
     }
 
-    const roll = Math.random();
-    let type: EnemyType = "normal";
-
-    if (this.wave >= 3 && roll < 0.25) {
-      type = "brute";
-    } else if (this.wave >= 2 && roll < 0.7) {
-      type = "runner";
-    }
-
-    this.enemies.push(this.createEnemy(type, spawnX, spawnY));
+    this.enemies.push(
+      this.createEnemy(this.pickEnemyType(), spawnX, spawnY),
+    );
   }
 
 
@@ -1339,7 +1424,21 @@ private chooseUpgrade(option: UpgradeOption) {
     };
 
     sprite.setOrigin(0.5, enemyOrigins[textureKey]);
-    sprite.setScale(textureKey === "enemy-bloated" ? 1.3 : 1);
+    sprite.setScale(
+      type === "brute"
+        ? 1.3
+        : type === "bomber"
+          ? 1.05
+          : type === "spitter"
+            ? 0.95
+            : 1,
+    );
+
+    const tint = this.getEnemyTint(type);
+
+    if (tint !== 0xffffff) {
+      sprite.setTint(tint);
+    }
     sprite.play(`${textureKey}-idle-south`);
 
     // Barra de vida acima da criatura.
@@ -1360,6 +1459,8 @@ private chooseUpgrade(option: UpgradeOption) {
       facing: "south",
       attackUntil: 0,
       nextDamageTime: 0,
+      nextShotTime: this.time.now + 1500 + Math.random() * 1500,
+      fuseUntil: 0,
       container,
       sprite,
       healthBar,
@@ -1373,6 +1474,11 @@ private chooseUpgrade(option: UpgradeOption) {
   private handleEnemyDefeated(enemy: Enemy) {
     enemy.alive = false;
     this.enemies = this.enemies.filter((other) => other !== enemy);
+
+    // Bomba: explode ao morrer (por qualquer causa), ferindo quem estiver perto.
+    if (enemy.type === "bomber") {
+      this.explodeBomber(enemy);
+    }
 
     this.createEnemyDeathEffect(
       enemy.container.x,
@@ -1410,7 +1516,7 @@ private chooseUpgrade(option: UpgradeOption) {
       // Onda concluída: aumenta a dificuldade.
       this.wave += 1;
 
-      this.enemiesRemainingInWave = 3 + (this.wave - 1);
+      this.enemiesRemainingInWave = this.getWaveEnemyCount(this.wave);
       this.enemiesToSpawn = this.enemiesRemainingInWave;
 
       this.updateHUD();
@@ -1593,7 +1699,9 @@ private chooseUpgrade(option: UpgradeOption) {
         ? -56
         : enemy.type === "brute"
           ? -60
-          : -52;
+          : enemy.type === "bomber"
+            ? -50
+            : -52;
     const barWidth = 30;
     const barHeight = 4;
     const healthRatio =
@@ -1701,15 +1809,16 @@ private chooseUpgrade(option: UpgradeOption) {
       }
     }
 
-    // Mantém uma pequena distância do jogador.
-    const isMoving = distance > 0.7;
+    // +1 = aproxima do jogador, -1 = se afasta, 0 = fica parado.
+    const chase = this.getChaseDirection(enemy, distance);
+    const isMoving = chase !== 0;
 
     let moveX = pushX * 1.2;
     let moveY = pushY * 1.2;
 
-    if (isMoving) {
-      moveX += dx / distance;
-      moveY += dy / distance;
+    if (isMoving && distance > 0) {
+      moveX += (dx / distance) * chase;
+      moveY += (dy / distance) * chase;
     }
 
     const moveLength = Math.hypot(moveX, moveY);
@@ -1754,6 +1863,188 @@ private chooseUpgrade(option: UpgradeOption) {
 
     enemy.container.setPosition(position.x, position.y);
     enemy.container.setDepth(position.y);
+
+    if (enemy.type === "spitter") {
+      this.updateSpitter(enemy, distance);
+    } else if (enemy.type === "bomber") {
+      this.updateBomber(enemy, distance);
+    }
+  }
+
+  private getChaseDirection(enemy: Enemy, distance: number): number {
+    if (enemy.type === "spitter") {
+      // Atira de longe: aproxima se estiver longe, recua se o jogador chegar perto.
+      if (distance > 6) return 1;
+      if (distance < 4) return -1;
+      return 0;
+    }
+
+    // Bomba com o pavio aceso fica parada esperando explodir.
+    if (enemy.type === "bomber" && enemy.fuseUntil > 0) return 0;
+
+    return distance > 0.7 ? 1 : 0;
+  }
+
+  // ---------------------------------------------------------------------
+  // Cuspidor: atira projéteis lentos (dá para desviar ou usar o dash)
+  // ---------------------------------------------------------------------
+
+  private updateSpitter(enemy: Enemy, distance: number) {
+    if (!enemy.alive || distance > 9) return;
+    if (this.time.now < enemy.nextShotTime) return;
+
+    enemy.nextShotTime = this.time.now + 2200 + Math.random() * 600;
+
+    this.playEnemyAttack(enemy);
+    this.fireEnemyProjectile(enemy);
+  }
+
+  private fireEnemyProjectile(enemy: Enemy) {
+    const dx = this.worldX - enemy.x;
+    const dy = this.worldY - enemy.y;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance === 0) return;
+
+    // Mira onde o jogador está agora (não prevê movimento), então andar desvia.
+    const shape = this.add.circle(0, 0, 5, 0x84cc16);
+    shape.setStrokeStyle(1, 0xecfccb, 0.9);
+
+    const projectile: EnemyProjectile = {
+      shape,
+      x: enemy.x,
+      y: enemy.y,
+      dirX: dx / distance,
+      dirY: dy / distance,
+      speed: this.spitterProjectileSpeed,
+      damage: this.spitterProjectileDamage,
+      expiresAt: this.time.now + 3000,
+    };
+
+    this.positionEnemyProjectile(projectile);
+    this.enemyProjectiles.push(projectile);
+  }
+
+  private positionEnemyProjectile(projectile: EnemyProjectile) {
+    const position = this.projectPosition(projectile.x, projectile.y);
+
+    projectile.shape.setPosition(position.x, position.y - 22);
+    projectile.shape.setDepth(position.y + 1);
+  }
+
+  private updateEnemyProjectiles(delta: number) {
+    const step = delta / 1000;
+
+    for (let i = this.enemyProjectiles.length - 1; i >= 0; i--) {
+      const projectile = this.enemyProjectiles[i];
+
+      projectile.x += projectile.dirX * projectile.speed * step;
+      projectile.y += projectile.dirY * projectile.speed * step;
+      this.positionEnemyProjectile(projectile);
+
+      let remove =
+        this.time.now > projectile.expiresAt ||
+        projectile.x < 0 ||
+        projectile.x > this.arenaSize ||
+        projectile.y < 0 ||
+        projectile.y > this.arenaSize ||
+        this.collidesAt(projectile.x, projectile.y); // bate nas pedras
+
+      // Durante o dash o projétil atravessa o jogador.
+      if (
+        !remove &&
+        this.time.now >= this.invulnerableUntil &&
+        Math.hypot(this.worldX - projectile.x, this.worldY - projectile.y) < 0.45
+      ) {
+        this.hurtPlayer(projectile.damage);
+        remove = true;
+      }
+
+      if (remove) {
+        projectile.shape.destroy();
+        this.enemyProjectiles.splice(i, 1);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Bomba: corre até o jogador, acende o pavio e explode (ou explode ao morrer)
+  // ---------------------------------------------------------------------
+
+  private updateBomber(enemy: Enemy, distance: number) {
+    if (!enemy.alive) return;
+
+    const now = this.time.now;
+
+    if (enemy.fuseUntil === 0) {
+      if (distance <= 1.1) {
+        enemy.fuseUntil = now + this.bomberFuseTime;
+        this.playEnemyAttack(enemy);
+        this.showBomberWarning(enemy);
+      }
+
+      return;
+    }
+
+    // Pisca em vermelho enquanto o pavio queima.
+    const lit = Math.floor((enemy.fuseUntil - now) / 90) % 2 === 0;
+    enemy.sprite.setTint(lit ? 0xff2d2d : this.getEnemyTint(enemy.type));
+
+    if (now >= enemy.fuseUntil) {
+      enemy.health = 0;
+      this.handleEnemyDefeated(enemy);
+    }
+  }
+
+  // Círculo no chão mostrando o alcance da explosão (para o jogador poder fugir).
+  private showBomberWarning(enemy: Enemy) {
+    const width = this.bomberBlastRadius * this.tileWidth * Math.SQRT2;
+    const height = this.bomberBlastRadius * this.tileHeight * Math.SQRT2;
+
+    const warning = this.add.ellipse(0, 2, width, height, 0xff5a1f, 0.12);
+    warning.setStrokeStyle(1, 0xff5a1f, 0.8);
+
+    // Fica dentro do container: some junto com o inimigo.
+    enemy.container.addAt(warning, 0);
+  }
+
+  private explodeBomber(enemy: Enemy) {
+    const radius = this.bomberBlastRadius;
+    const position = this.projectPosition(enemy.x, enemy.y);
+
+    const width = radius * this.tileWidth * Math.SQRT2;
+    const height = radius * this.tileHeight * Math.SQRT2;
+
+    const blast = this.add.ellipse(position.x, position.y, width, height, 0xfb923c, 0.4);
+    blast.setStrokeStyle(2, 0xfff7ed, 0.9);
+    blast.setDepth(10000);
+    blast.setScale(0.3);
+
+    this.tweens.add({
+      targets: blast,
+      scale: 1,
+      alpha: 0,
+      duration: 350,
+      ease: "Cubic.easeOut",
+      onComplete: () => blast.destroy(),
+    });
+
+    this.cameras.main.shake(160, 0.006);
+    this.playSfx("hit", 0.9);
+
+    // Ffere o jogador se estiver no raio.
+    if (Math.hypot(this.worldX - enemy.x, this.worldY - enemy.y) <= radius) {
+      this.hurtPlayer(this.bomberBlastDamage);
+    }
+
+    // Reação em cadeia: fere os outros inimigos no raio (inclusive outras bombas).
+    for (const other of [...this.enemies]) {
+      if (!other.alive) continue;
+
+      if (Math.hypot(other.x - enemy.x, other.y - enemy.y) <= radius) {
+        this.hitEnemy(other, this.bomberBlastEnemyDamage);
+      }
+    }
   }
 
   // Golpe corpo a corpo: atinge todos os inimigos à frente, dentro do alcance.
@@ -2256,11 +2547,15 @@ private createLevelUpEffect() {
       return;
     }
 
-    // Cada inimigo próximo ataca com o seu próprio tempo de recarga.
-    let hits = 0;
+    // Cada inimigo próximo ataca com o seu próprio tempo de recarga e dano.
+    let totalDamage = 0;
 
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
+
+      const contactDamage = this.getContactDamage(enemy.type);
+
+      if (contactDamage <= 0) continue;
 
       const distance = Phaser.Math.Distance.Between(
         this.worldX,
@@ -2277,82 +2572,85 @@ private createLevelUpEffect() {
 
       enemy.nextDamageTime = this.time.now + this.damageCooldown;
       this.playEnemyAttack(enemy);
-      hits++;
+      totalDamage += contactDamage;
     }
 
-    if (hits === 0) return;
+    if (totalDamage === 0) return;
+
+    this.hurtPlayer(totalDamage);
+  }
+
+  // Aplica dano ao jogador (contato, projétil ou explosão).
+  // Respeita a invulnerabilidade do dash e a redução do escudo.
+  private hurtPlayer(rawDamage: number) {
+    if (this.gameOver) return;
+    if (this.time.now < this.invulnerableUntil) return;
 
     const shieldIsActive = this.time.now < this.shieldActiveUntil;
 
-    const damagePerHit = shieldIsActive
-      ? Math.ceil(this.contactDamage * (1 - this.shieldDamageReduction))
-      : this.contactDamage;
+    const finalDamage = shieldIsActive
+      ? Math.ceil(rawDamage * (1 - this.shieldDamageReduction))
+      : rawDamage;
 
-    const finalDamage = damagePerHit * hits;
+    this.playerHealth = Math.max(0, this.playerHealth - finalDamage);
 
-  this.playerHealth = Math.max(
-    0,
-    this.playerHealth - finalDamage,
-  );
-
-
-  // efeito de dano no jogador
+    // Efeito de dano no jogador.
     this.player
       .setTint(0xffffff)
       .setTintMode(Phaser.TintModes.FILL);
 
-  this.time.delayedCall(100, () => {
-    if (this.player && this.player.active) {
-      this.player.clearTint();
+    this.time.delayedCall(100, () => {
+      if (this.player && this.player.active) {
+        this.player.clearTint();
+      }
+    });
+
+    this.updateHUD();
+
+    // Efeito visual ao receber dano.
+    this.player.setAlpha(0.35);
+
+    this.time.delayedCall(150, () => {
+      if (this.player.active && !this.gameOver) {
+        this.player.setAlpha(1);
+      }
+    });
+
+    if (this.playerHealth <= 0) {
+      // hurtPlayer() já retorna cedo quando gameOver é true,
+      // então esta transição acontece uma única vez.
+      this.gameOver = true;
+
+      const bestWave = saveBestWave(this.wave);
+
+      const survivalTime = Math.floor(
+        (Date.now() - this.matchStartTime) / 1000
+      );
+
+      saveMatch({
+        wave: this.wave,
+        level: this.level,
+        survivalTime,
+        enemiesDefeated: this.totalEnemiesDefeated,
+        date: new Date().toISOString(),
+      });
+
+      savePermanentStats({
+        wave: this.wave,
+        level: this.level,
+        survivalTime,
+        enemiesDefeated: this.totalEnemiesDefeated,
+      });
+
+      this.unlockAndNotify("first-match");
+
+      this.scene.start("EndScene", {
+        result: "defeat",
+        wave: this.wave,
+        bestWave,
+      });
     }
-  });
-
-  this.updateHUD();
-
-  // Efeito visual ao receber dano.
-  this.player.setAlpha(0.35);
-
-  this.time.delayedCall(150, () => {
-    if (this.player.active && !this.gameOver) {
-      this.player.setAlpha(1);
-    }
-  });
-
-  if (this.playerHealth <= 0) {
-    // takeDamage() já retorna cedo quando gameOver é true,
-    // então esta transição acontece uma única vez.
-    this.gameOver = true;
-
-    const bestWave = saveBestWave(this.wave);
-
-    const survivalTime = Math.floor(
-      (Date.now() - this.matchStartTime) / 1000
-    );
-
-    saveMatch({
-      wave: this.wave,
-      level: this.level,
-      survivalTime,
-      enemiesDefeated: this.totalEnemiesDefeated,
-      date: new Date().toISOString(),
-    });
-
-    savePermanentStats({
-      wave: this.wave,
-      level: this.level,
-      survivalTime,
-      enemiesDefeated: this.totalEnemiesDefeated,
-    });
-
-    this.unlockAndNotify("first-match");
-
-    this.scene.start("EndScene", {
-      result: "defeat",
-      wave: this.wave,
-      bestWave,
-    });
   }
-}
 
 private updateRegeneration(delta: number) {
   if (this.regenPerSecond <= 0) return;
@@ -2803,6 +3101,7 @@ private createAbilityParticles(
 
     this.updateXpGems(delta);
     this.updateEnemies(delta);
+    this.updateEnemyProjectiles(delta);
     this.takeDamage();
 
     if (this.gameOver) {
