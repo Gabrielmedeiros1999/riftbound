@@ -135,6 +135,8 @@ export class ArenaScene extends Phaser.Scene {
   private xpGems: XpGem[] = [];
   // Distância (em tiles) em que a gema começa a ser puxada até o jogador.
   private gemMagnetRadius = 1.6;
+  // Alcance máximo que a melhoria "Ímã" pode atingir.
+  private readonly gemMagnetRadiusMax = 5.5;
   // Distância em que a gema é coletada.
   private readonly gemCollectRadius = 0.35;
   // Tempo (ms) após cair até a gema poder ser puxada.
@@ -1017,6 +1019,21 @@ private getUpgradePool(): UpgradeOption[] {
         this.lifeStealPerHit += 2;
       },
     },
+    ...(this.gemMagnetRadius < this.gemMagnetRadiusMax
+      ? [
+          {
+            title: "IMA DE GEMAS",
+            description: `Aumenta o alcance de coleta em +0.8 (atual: ${this.gemMagnetRadius.toFixed(1)})`,
+            apply: () => {
+              this.gemMagnetRadius = Math.min(
+                this.gemMagnetRadius + 0.8,
+                this.gemMagnetRadiusMax,
+              );
+              this.showMagnetPulse();
+            },
+          },
+        ]
+      : []),
     {
       title: arrowName,
       description:
@@ -1486,6 +1503,31 @@ private chooseUpgrade(option: UpgradeOption) {
     gem.container.destroy();
 
     this.gainXP(gem.value);
+  }
+
+  // Anel que se expande a partir do jogador mostrando o novo alcance do ímã.
+  private showMagnetPulse() {
+    const position = this.projectPosition(this.worldX, this.worldY);
+
+    // Um círculo de raio r (em tiles) vira, na projeção isométrica,
+    // uma elipse de r*tileWidth*√2 por r*tileHeight*√2.
+    const width = this.gemMagnetRadius * this.tileWidth * Math.SQRT2;
+    const height = this.gemMagnetRadius * this.tileHeight * Math.SQRT2;
+
+    const ring = this.add.ellipse(position.x, position.y, width, height);
+
+    ring.setStrokeStyle(2, 0x67e8f9, 0.9);
+    ring.setDepth(10000);
+    ring.setScale(0.2);
+
+    this.tweens.add({
+      targets: ring,
+      scale: 1,
+      alpha: 0,
+      duration: 650,
+      ease: "Cubic.easeOut",
+      onComplete: () => ring.destroy(),
+    });
   }
 
   private updateXpGems(delta: number) {
