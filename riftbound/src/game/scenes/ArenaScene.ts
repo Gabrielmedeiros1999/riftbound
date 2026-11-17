@@ -41,6 +41,19 @@ type Enemy = {
   healthBar: Phaser.GameObjects.Graphics;
 };
 
+type XpGem = {
+  x: number;
+  y: number;
+  value: number;
+  age: number;
+  attracted: boolean;
+  speed: number;
+  bobOffset: number;
+  container: Phaser.GameObjects.Container;
+  glow: Phaser.GameObjects.Arc;
+  diamond: Phaser.GameObjects.Rectangle;
+};
+
 export class ArenaScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private keys!: {
@@ -117,6 +130,25 @@ export class ArenaScene extends Phaser.Scene {
   private pendingSpawns = 0;
   // Limite máximo de inimigos simultâneos, em qualquer onda.
   private readonly maxConcurrentEnemiesCap = 5;
+
+  // Gemas de XP no chão (dropadas pelos inimigos ao morrer).
+  private xpGems: XpGem[] = [];
+  // Distância (em tiles) em que a gema começa a ser puxada até o jogador.
+  private gemMagnetRadius = 1.6;
+  // Distância em que a gema é coletada.
+  private readonly gemCollectRadius = 0.35;
+  // Tempo (ms) após cair até a gema poder ser puxada.
+  private readonly gemPickupDelay = 250;
+  // Depois desse tempo (ms) a gema voa até o jogador sozinha, para não se perder.
+  private readonly gemAutoAttractTime = 7000;
+  // Aceleração e velocidade máxima (tiles/s) da gema ao ser puxada.
+  private readonly gemAcceleration = 22;
+  private readonly gemMaxSpeed = 14;
+
+  // Hit-stop: pausa curtíssima ao acertar/matar, para dar peso aos golpes.
+  private hitStopUntil = 0;
+  private nextHitStopTime = 0;
+  private readonly hitStopCooldown = 120;
 
   // Inimigos já atingidos pelo dash atual (cada um leva só um golpe).
   private dashHitEnemies = new Set<number>();
@@ -231,6 +263,10 @@ export class ArenaScene extends Phaser.Scene {
   this.enemiesRemainingInWave = 3;
   this.enemiesToSpawn = 3;
   this.pendingSpawns = 0;
+  this.xpGems = [];
+  this.gemMagnetRadius = 1.6;
+  this.hitStopUntil = 0;
+  this.nextHitStopTime = 0;
   
   this.totalEnemiesDefeated = 0;
 
@@ -1333,9 +1369,16 @@ private chooseUpgrade(option: UpgradeOption) {
     );
     enemy.container.destroy();
 
-    this.gainXP(1);
+    this.dropXpGem(enemy);
     this.totalEnemiesDefeated++;
     this.enemiesRemainingInWave -= 1;
+
+    // Última criatura da onda: todas as gemas voam até o jogador.
+    if (this.enemiesRemainingInWave <= 0) {
+      this.attractAllGems();
+    }
+
+    this.playKillFeedback(enemy.type);
     this.updateHUD();
 
     this.time.delayedCall(800, () => {
@@ -1356,6 +1399,148 @@ private chooseUpgrade(option: UpgradeOption) {
       this.updateHUD();
       this.fillEnemies();
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Impacto: hit-stop e tremor de tela
+  // ---------------------------------------------------------------------
+
+  // Congela a simulação por alguns milissegundos. Tem um intervalo mínimo
+  // entre usos para não causar travadinhas quando vários inimigos morrem juntos.
+  private hitStop(duration: number) {
+    const now = this.time.now;
+
+    if (now < this.hitStopUntil || now < this.nextHitStopTime) return;
+
+    this.hitStopUntil = now + duration;
+    this.nextHitStopTime = now + duration + this.hitStopCooldown;
+  }
+
+  private playKillFeedback(type: EnemyType) {
+    const isBrute = type === "brute";
+
+    this.hitStop(isBrute ? 80 : 50);
+
+    // Tremor leve; se já houver um em andamento, o Phaser ignora este.
+    this.cameras.main.shake(isBrute ? 140 : 80, isBrute ? 0.005 : 0.0025);
+  }
+
+  // ---------------------------------------------------------------------
+  // Gemas de XP
+  // ---------------------------------------------------------------------
+
+  private dropXpGem(enemy: Enemy) {
+    const value = enemy.type === "brute" ? 2 : 1;
+    const color = value > 1 ? 0xc084fc : 0x67e8f9;
+    const size = value > 1 ? 11 : 8;
+
+    const x = Phaser.Math.Clamp(
+      enemy.x + Phaser.Math.FloatBetween(-0.25, 0.25),
+      0.3,
+      this.arenaSize - 0.3,
+    );
+    const y = Phaser.Math.Clamp(
+      enemy.y + Phaser.Math.FloatBetween(-0.25, 0.25),
+      0.3,
+      this.arenaSize - 0.3,
+    );
+
+    const position = this.projectPosition(x, y);
+
+    const container = this.add.container(position.x, position.y);
+
+    const shadow = this.add.ellipse(0, 2, size * 1.4, size * 0.7, 0x020617, 0.5);
+    const glow = this.add.circle(0, -7, size * 1.1, color, 0.25);
+    const diamond = this.add.rectangle(0, -7, size, size, color);
+
+    diamond.setAngle(45);
+    diamond.setStrokeStyle(1, 0xffffff, 0.85);
+
+    container.add([shadow, glow, diamond]);
+    container.setDepth(position.y);
+    container.setScale(0);
+
+    this.xpGems.push({
+      x,
+      y,
+      value,
+      age: 0,
+      attracted: false,
+      speed: 3,
+      bobOffset: Math.random() * Math.PI * 2,
+      container,
+      glow,
+      diamond,
+    });
+  }
+
+  // Faz todas as gemas do chão voarem até o jogador (fim da onda).
+  private attractAllGems() {
+    for (const gem of this.xpGems) {
+      gem.attracted = true;
+    }
+  }
+
+  private collectXpGem(gem: XpGem) {
+    this.xpGems = this.xpGems.filter((other) => other !== gem);
+    gem.container.destroy();
+
+    this.gainXP(gem.value);
+  }
+
+  private updateXpGems(delta: number) {
+    if (this.xpGems.length === 0) return;
+
+    const dt = delta / 1000;
+
+    for (const gem of [...this.xpGems]) {
+      gem.age += delta;
+
+      const dx = this.worldX - gem.x;
+      const dy = this.worldY - gem.y;
+      const distance = Math.hypot(dx, dy);
+
+      const canPickUp = gem.age >= this.gemPickupDelay;
+
+      if (
+        canPickUp &&
+        !gem.attracted &&
+        (distance <= this.gemMagnetRadius ||
+          gem.age >= this.gemAutoAttractTime)
+      ) {
+        gem.attracted = true;
+      }
+
+      if (canPickUp && gem.attracted) {
+        gem.speed = Math.min(
+          gem.speed + this.gemAcceleration * dt,
+          this.gemMaxSpeed,
+        );
+
+        const step = gem.speed * dt;
+
+        if (distance <= this.gemCollectRadius || step >= distance) {
+          this.collectXpGem(gem);
+          continue;
+        }
+
+        gem.x += (dx / distance) * step;
+        gem.y += (dy / distance) * step;
+      }
+
+      // Visual: "pulinho" ao cair e leve flutuação.
+      const pop = Math.min(1, gem.age / 250);
+      gem.container.setScale(Phaser.Math.Easing.Back.Out(pop));
+
+      const bobY = -7 + Math.sin(gem.age / 220 + gem.bobOffset) * 2;
+      gem.diamond.y = bobY;
+      gem.glow.y = bobY;
+
+      const position = this.projectPosition(gem.x, gem.y);
+
+      gem.container.setPosition(position.x, position.y);
+      gem.container.setDepth(position.y);
+    }
   }
 
   private updateEnemyHealthBar(enemy: Enemy) {
@@ -1551,6 +1736,7 @@ private chooseUpgrade(option: UpgradeOption) {
 
       this.hitEnemy(enemy, this.playerDamage);
       this.healPlayer(this.lifeStealPerHit);
+      this.hitStop(35);
     }
   }
 
@@ -2401,6 +2587,11 @@ private createAbilityParticles(
       return;
     }
 
+    // Hit-stop: durante alguns milissegundos a simulação fica parada.
+    if (this.time.now < this.hitStopUntil) {
+      return;
+    }
+
     this.checkDashDamage();
 
     if (this.upgradePending) {
@@ -2568,6 +2759,7 @@ private createAbilityParticles(
       this.playHeroAnimation(isMoving ? "walk" : "idle");
     }
 
+    this.updateXpGems(delta);
     this.updateEnemies(delta);
     this.takeDamage();
 
