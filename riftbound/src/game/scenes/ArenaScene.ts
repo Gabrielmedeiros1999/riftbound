@@ -151,6 +151,8 @@ export class ArenaScene extends Phaser.Scene {
   private enemyProjectiles: EnemyProjectile[] = [];
   private readonly spitterProjectileSpeed = 4.5; // tiles/s (dá para desviar)
   private readonly spitterProjectileDamage = 8;
+  // Atraso (ms) do tiro após iniciar a animação: o cuspe aparece por volta do 5º quadro.
+  private readonly spitterShotDelay = 280;
 
   // Bomba: pavio, raio e dano da explosão.
   private readonly bomberFuseTime = 600; // ms entre chegar perto e explodir
@@ -184,7 +186,9 @@ export class ArenaScene extends Phaser.Scene {
 
   private getEnemyTexture(type: EnemyType): string {
     if (type === "runner") return "enemy-ghoul";
-    if (type === "brute" || type === "bomber") return "enemy-bloated";
+    if (type === "brute") return "enemy-bloated";
+    if (type === "spitter") return "enemy-spitter";
+    if (type === "bomber") return "enemy-bomber";
     return "enemy-zombie";
   }
 
@@ -395,6 +399,16 @@ export class ArenaScene extends Phaser.Scene {
     frameWidth: 60,
     frameHeight: 60,
   });
+  this.load.spritesheet("enemy-spitter", "assets/enemies/Spitter_full.png", {
+    frameWidth: 64,
+    frameHeight: 64,
+  });
+
+  this.load.spritesheet("enemy-bomber", "assets/enemies/Bomber_full.png", {
+    frameWidth: 64,
+    frameHeight: 64,
+  });
+
   this.load.image("terrain-grass", "assets/terrain/grass_tile.png");
   this.load.image("terrain-dirt", "assets/terrain/dirt_tile.png");
   this.load.image("terrain-sand", "assets/terrain/sand_tile.png");
@@ -460,6 +474,24 @@ export class ArenaScene extends Phaser.Scene {
     this.createPixelLabEnemyAnimations("enemy-zombie");
     this.createPixelLabEnemyAnimations("enemy-ghoul");
     this.createPixelLabEnemyAnimations("enemy-bloated");
+
+    // Os sprites novos têm outro formato: 9 colunas, 9 quadros por animação
+    // e o ATAQUE vem antes da caminhada na folha.
+    this.createPixelLabEnemyAnimations("enemy-spitter", {
+      columns: 9,
+      frames: 9,
+      attackFirst: true,
+      attackFrameRate: 18, // 9 quadros em 0,5 s
+      walkFrameRate: 12,
+    });
+
+    this.createPixelLabEnemyAnimations("enemy-bomber", {
+      columns: 9,
+      frames: 9,
+      attackFirst: true,
+      attackFrameRate: 15, // 9 quadros em 0,6 s = duração do pavio
+      walkFrameRate: 16,
+    });
     this.createPlayer();
     this.setupCamera();
     this.fillEnemies();
@@ -1266,14 +1298,6 @@ private chooseUpgrade(option: UpgradeOption) {
     return 0xef4444;
   }
 
-  // Cor aplicada ao sprite (0xffffff = cores originais).
-  // Cuspidor e bomba reaproveitam sprites existentes, distinguidos pela cor.
-  private getEnemyTint(type: EnemyType): number {
-    if (type === "spitter") return 0x7dd3fc;
-    if (type === "bomber") return 0xfb923c;
-    return 0xffffff;
-  }
-
   // Dano por contato de cada tipo (a base é contactDamage).
   // Como agora há muito mais inimigos ao mesmo tempo, cada um bate mais fraco.
   private getContactDamage(type: EnemyType): number {
@@ -1421,24 +1445,12 @@ private chooseUpgrade(option: UpgradeOption) {
       "enemy-zombie": 53 / 64,
       "enemy-ghoul": 56 / 68,
       "enemy-bloated": 50 / 60,
+      "enemy-spitter": 54 / 64,
+      "enemy-bomber": 52 / 64,
     };
 
     sprite.setOrigin(0.5, enemyOrigins[textureKey]);
-    sprite.setScale(
-      type === "brute"
-        ? 1.3
-        : type === "bomber"
-          ? 1.05
-          : type === "spitter"
-            ? 0.95
-            : 1,
-    );
-
-    const tint = this.getEnemyTint(type);
-
-    if (tint !== 0xffffff) {
-      sprite.setTint(tint);
-    }
+    sprite.setScale(type === "brute" ? 1.3 : 1);
     sprite.play(`${textureKey}-idle-south`);
 
     // Barra de vida acima da criatura.
@@ -1724,9 +1736,27 @@ private chooseUpgrade(option: UpgradeOption) {
     );
   }
 
-    private createPixelLabEnemyAnimations(textureKey: string) {
-    const columns = 8;
+  // Cria as animações de um spritesheet de inimigo.
+  // Layout padrão (zumbi, ghoul, inchado): 8 colunas, linha 0 = idle,
+  // linhas 1-8 = caminhada e 9-16 = ataque, 8 quadros cada.
+  // Os sprites novos usam 9 colunas/9 quadros e o ataque vem primeiro.
+  private createPixelLabEnemyAnimations(
+    textureKey: string,
+    layout: {
+      columns?: number;
+      frames?: number;
+      attackFirst?: boolean;
+      attackFrameRate?: number;
+      walkFrameRate?: number;
+    } = {},
+  ) {
+    const columns = layout.columns ?? 8;
+    const frames = layout.frames ?? 8;
+    const attackFirst = layout.attackFirst ?? false;
+    const attackFrameRate = layout.attackFrameRate ?? 16;
+    const walkFrameRate = layout.walkFrameRate ?? 12;
 
+    // Ordem das direções na folha: S, SE, E, NE, N, NO, O, SO.
     const directions = [
       { name: "south", index: 0 },
       { name: "east", index: 2 },
@@ -1743,29 +1773,30 @@ private chooseUpgrade(option: UpgradeOption) {
         repeat: -1,
       });
 
-      // Walk: linhas 1 a 8, 8 quadros.
-      const walkStart = (1 + direction.index) * columns;
+      const walkRow = (attackFirst ? 9 : 1) + direction.index;
+      const attackRow = (attackFirst ? 1 : 9) + direction.index;
+
+      const walkStart = walkRow * columns;
 
       this.anims.create({
         key: `${textureKey}-walk-${direction.name}`,
         frames: this.anims.generateFrameNumbers(textureKey, {
           start: walkStart,
-          end: walkStart + 7,
+          end: walkStart + frames - 1,
         }),
-        frameRate: 12,
+        frameRate: walkFrameRate,
         repeat: -1,
       });
 
-      // Ataque: linhas 9 a 16, 8 quadros (0,5 s).
-      const attackStart = (9 + direction.index) * columns;
+      const attackStart = attackRow * columns;
 
       this.anims.create({
         key: `${textureKey}-attack-${direction.name}`,
         frames: this.anims.generateFrameNumbers(textureKey, {
           start: attackStart,
-          end: attackStart + 7,
+          end: attackStart + frames - 1,
         }),
-        frameRate: 16,
+        frameRate: attackFrameRate,
         repeat: 0,
       });
     }
@@ -1896,7 +1927,12 @@ private chooseUpgrade(option: UpgradeOption) {
     enemy.nextShotTime = this.time.now + 2200 + Math.random() * 600;
 
     this.playEnemyAttack(enemy);
-    this.fireEnemyProjectile(enemy);
+
+    this.time.delayedCall(this.spitterShotDelay, () => {
+      if (enemy.alive && !this.gameOver) {
+        this.fireEnemyProjectile(enemy);
+      }
+    });
   }
 
   private fireEnemyProjectile(enemy: Enemy) {
@@ -1986,9 +2022,8 @@ private chooseUpgrade(option: UpgradeOption) {
       return;
     }
 
-    // Pisca em vermelho enquanto o pavio queima.
-    const lit = Math.floor((enemy.fuseUntil - now) / 90) % 2 === 0;
-    enemy.sprite.setTint(lit ? 0xff2d2d : this.getEnemyTint(enemy.type));
+    // A animação de ataque do sprite (brilho e tremor) é o aviso visual;
+    // aqui só esperamos o pavio acabar.
 
     if (now >= enemy.fuseUntil) {
       enemy.health = 0;
