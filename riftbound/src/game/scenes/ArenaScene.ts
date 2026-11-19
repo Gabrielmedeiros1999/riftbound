@@ -273,6 +273,19 @@ export class ArenaScene extends Phaser.Scene {
   private hudText!: Phaser.GameObjects.Text;
   private healthBar!: Phaser.GameObjects.Graphics;
   private xpBar!: Phaser.GameObjects.Graphics;
+
+  // Combo de mortes seguidas.
+  private comboCount = 0;
+  private bestCombo = 0;
+  // Tempo restante (ms) até o combo acabar. Conta só enquanto o jogo roda
+  // (não durante pausa, escolha de melhoria ou hit-stop).
+  private comboTimeLeft = 0;
+  // Janela (ms) para matar o próximo inimigo e manter o combo.
+  private readonly comboWindow = 3500;
+  private comboLabel!: Phaser.GameObjects.Text;
+  private comboText!: Phaser.GameObjects.Text;
+  private comboBestText!: Phaser.GameObjects.Text;
+  private comboBar!: Phaser.GameObjects.Graphics;
   private abilityHudText?: Phaser.GameObjects.Text;
   private abilityHudIcon?: Phaser.GameObjects.Text;
   private abilityCooldownBar?: Phaser.GameObjects.Graphics;
@@ -297,6 +310,9 @@ export class ArenaScene extends Phaser.Scene {
   this.enemiesToSpawn = this.getWaveEnemyCount(1);
   this.pendingSpawns = 0;
   this.xpGems = [];
+  this.comboCount = 0;
+  this.bestCombo = 0;
+  this.comboTimeLeft = 0;
   this.enemyProjectiles = [];
   this.gemMagnetRadius = 1.6;
   this.hitStopUntil = 0;
@@ -1514,6 +1530,7 @@ private chooseUpgrade(option: UpgradeOption) {
     }
 
     this.playKillFeedback(enemy.type);
+    this.registerComboKill();
     this.updateHUD();
 
     this.time.delayedCall(800, () => {
@@ -2437,7 +2454,232 @@ private createHitEffect(
       .setScrollFactor(0)
       .setDepth(10001);
 
+    this.createComboHUD();
     this.updateHUD();
+  }
+
+  // ---------------------------------------------------------------------
+  // Combo de mortes seguidas
+  // ---------------------------------------------------------------------
+
+  // Cor do combo, que "esquenta" conforme ele cresce.
+  private getComboColor(count: number): number {
+    if (count >= 50) return 0xf87171; // vermelho
+    if (count >= 20) return 0xfb923c; // laranja
+    if (count >= 10) return 0xfbbf24; // âmbar
+    if (count >= 5) return 0x67e8f9; // ciano
+    return 0xe9d5ff; // lilás
+  }
+
+  private toCssColor(color: number): string {
+    return `#${color.toString(16).padStart(6, "0")}`;
+  }
+
+  private createComboHUD() {
+    // Canto superior direito, logo abaixo do painel do HUD.
+    const x = this.scale.width - 28;
+
+    this.comboLabel = this.add
+      .text(x, 118, "COMBO", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        fontStyle: "bold",
+        color: "#e9d5ff",
+        stroke: "#1f102e",
+        strokeThickness: 3,
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(10001);
+
+    this.comboText = this.add
+      .text(x, 152, "x2", {
+        fontFamily: "monospace",
+        fontSize: "40px",
+        fontStyle: "bold",
+        color: "#ffffff",
+        stroke: "#1f102e",
+        strokeThickness: 6,
+      })
+      .setOrigin(1, 0.5)
+      .setScrollFactor(0)
+      .setDepth(10001);
+
+    this.comboBar = this.add
+      .graphics()
+      .setScrollFactor(0)
+      .setDepth(10001);
+
+    this.comboBestText = this.add
+      .text(x, 190, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        fontStyle: "bold",
+        color: "#a78bfa",
+        stroke: "#1f102e",
+        strokeThickness: 3,
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(10001);
+
+    this.refreshComboHUD();
+  }
+
+  // Barrinha que esvazia mostrando quanto tempo falta para o combo acabar.
+  private drawComboBar() {
+    const width = 120;
+    const height = 5;
+    const x = this.scale.width - 28 - width;
+    const y = 178;
+
+    const ratio = Phaser.Math.Clamp(this.comboTimeLeft / this.comboWindow, 0, 1);
+
+    this.comboBar.clear();
+    this.comboBar.fillStyle(0x1f102e, 0.85);
+    this.comboBar.fillRect(x, y, width, height);
+    this.comboBar.fillStyle(this.getComboColor(this.comboCount), 1);
+    this.comboBar.fillRect(x, y, width * ratio, height);
+  }
+
+  // Mostra/esconde e atualiza os textos. O combo só aparece a partir de x2.
+  private refreshComboHUD() {
+    const active = this.comboCount >= 2;
+
+    this.comboLabel.setVisible(active);
+    this.comboText.setVisible(active);
+    this.comboBar.setVisible(active);
+
+    if (active) {
+      const css = this.toCssColor(this.getComboColor(this.comboCount));
+
+      this.comboText.setText(`x${this.comboCount}`);
+      this.comboText.setColor(css);
+      this.comboLabel.setColor(css);
+      this.drawComboBar();
+    }
+
+    this.comboBestText.setText(
+      this.bestCombo >= 2 ? `MELHOR: x${this.bestCombo}` : "",
+    );
+  }
+
+  // Chamado a cada inimigo morto.
+  private registerComboKill() {
+    this.comboCount++;
+    this.comboTimeLeft = this.comboWindow;
+
+    if (this.comboCount > this.bestCombo) {
+      this.bestCombo = this.comboCount;
+    }
+
+    this.refreshComboHUD();
+
+    if (this.comboCount >= 2) {
+      // "Pulinho" no número a cada morte; o combo maior fica um pouco maior.
+      const baseScale = Math.min(1.5, 1 + this.comboCount / 60);
+
+      this.tweens.killTweensOf(this.comboText);
+      this.comboText.setScale(baseScale * 1.35);
+
+      this.tweens.add({
+        targets: this.comboText,
+        scale: baseScale,
+        duration: 180,
+        ease: "Back.easeOut",
+      });
+    }
+
+    const count = this.comboCount;
+
+    if (count === 10 || count === 25 || (count >= 50 && count % 50 === 0)) {
+      this.showComboMilestone(count);
+    }
+  }
+
+  // Avança o tempo do combo. Fica parado enquanto não há inimigos na arena,
+  // para o combo não acabar no intervalo entre as ondas.
+  private updateCombo(delta: number) {
+    if (this.comboCount === 0 || this.enemies.length === 0) return;
+
+    this.comboTimeLeft -= delta;
+
+    if (this.comboTimeLeft <= 0) {
+      this.endCombo();
+      return;
+    }
+
+    this.drawComboBar();
+  }
+
+  private endCombo() {
+    const finalCount = this.comboCount;
+
+    this.comboCount = 0;
+    this.comboTimeLeft = 0;
+    this.refreshComboHUD();
+
+    // Resumo discreto de combos relevantes.
+    if (finalCount >= 5) {
+      const summary = this.add
+        .text(this.scale.width - 28, 152, `${finalCount} MORTES SEGUIDAS`, {
+          fontFamily: "monospace",
+          fontSize: "14px",
+          fontStyle: "bold",
+          color: this.toCssColor(this.getComboColor(finalCount)),
+          stroke: "#1f102e",
+          strokeThickness: 4,
+        })
+        .setOrigin(1, 0.5)
+        .setScrollFactor(0)
+        .setDepth(10001);
+
+      this.tweens.add({
+        targets: summary,
+        y: summary.y - 24,
+        alpha: 0,
+        duration: 1100,
+        ease: "Cubic.easeOut",
+        onComplete: () => summary.destroy(),
+      });
+    }
+  }
+
+  // Aviso grande no centro da tela nos marcos do combo (10, 25, 50, 100...).
+  private showComboMilestone(count: number) {
+    const css = this.toCssColor(this.getComboColor(count));
+
+    const banner = this.add
+      .text(this.scale.width / 2, 150, `COMBO x${count}!`, {
+        fontFamily: "monospace",
+        fontSize: "34px",
+        fontStyle: "bold",
+        color: css,
+        stroke: "#1f102e",
+        strokeThickness: 7,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(10002)
+      .setScale(0.6);
+
+    this.tweens.add({
+      targets: banner,
+      scale: 1.15,
+      duration: 200,
+      ease: "Back.easeOut",
+      onComplete: () => {
+        this.tweens.add({
+          targets: banner,
+          alpha: 0,
+          y: banner.y - 20,
+          delay: 500,
+          duration: 450,
+          ease: "Cubic.easeIn",
+          onComplete: () => banner.destroy(),
+        });
+      },
+    });
   }
 
 private showDamageNumber(
@@ -3135,6 +3377,7 @@ private createAbilityParticles(
     }
 
     this.updateXpGems(delta);
+    this.updateCombo(delta);
     this.updateEnemies(delta);
     this.updateEnemyProjectiles(delta);
     this.takeDamage();
