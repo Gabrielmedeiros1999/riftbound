@@ -201,6 +201,16 @@ export class ArenaScene extends Phaser.Scene {
   private pendingLevelUps = 0;
   private upgradePending = false;
   private upgradeObjects: Phaser.GameObjects.GameObject[] = [];
+  private readonly upgradeIcons: Record<string, { key: string; emoji: string }> = {
+    "LAMINA APRIMORADA": { key: "icon-blade", emoji: "⚔️" },
+    "PASSOS VELOZES": { key: "icon-speed", emoji: "👟" },
+    "VITALIDADE": { key: "icon-vitality", emoji: "❤️" },
+    "REGENERACAO": { key: "icon-regen", emoji: "💚" },
+    "SEDE DE SANGUE": { key: "icon-bloodthirst", emoji: "🩸" },
+    "IMA DE GEMAS": { key: "icon-magnet", emoji: "🧲" },
+    "ARCO ARCANO": { key: "icon-arrow", emoji: "🏹" },
+    "BOLA DE FOGO": { key: "icon-fireball", emoji: "🔥" },
+  };
 
     // Reroll / Pular / Banir: cargas por partida.
   private readonly maxUpgradeRerolls = 3;
@@ -458,6 +468,20 @@ export class ArenaScene extends Phaser.Scene {
   this.load.image("terrain-grass", "assets/terrain/grass_tile.png");
   this.load.image("terrain-dirt", "assets/terrain/dirt_tile.png");
   this.load.image("terrain-sand", "assets/terrain/sand_tile.png");
+      // Ícones das melhorias (PNG 48x48). Se um arquivo não existir, o jogo
+    // usa o emoji provisório no lugar (o navegador só avisa o 404 no console).
+    [
+      "blade",
+      "speed",
+      "vitality",
+      "regen",
+      "bloodthirst",
+      "magnet",
+      "arrow",
+      "fireball",
+    ].forEach((name) => {
+      this.load.image(`icon-${name}`, `assets/icons/upgrades/${name}.png`);
+    });
  }
 
 
@@ -1346,13 +1370,18 @@ private getUpgradePool(): UpgradeOption[] {
     this.refreshUpgradeButtons();
   }
 
-  // Desenha as cartas. No modo banir elas ficam vermelhas.
+   // Desenha as cartas, agora com um ícone à esquerda.
+  // No modo banir elas ficam vermelhas.
   private renderUpgradeCards() {
     this.upgradeCardObjects.forEach((object) => object.destroy());
     this.upgradeCardObjects = [];
 
     const width = this.scale.width;
     const height = this.scale.height;
+
+    const cardWidth = 400;
+    const cardHeight = 64;
+    const left = width / 2 - cardWidth / 2;
 
     const fill = this.banishMode ? 0x2a1215 : 0x1e1b2e;
     const stroke = this.banishMode ? 0xef4444 : 0x8b5cf6;
@@ -1362,26 +1391,48 @@ private getUpgradePool(): UpgradeOption[] {
       const y = height / 2 - 45 + index * 75;
 
       const card = this.add
-        .rectangle(width / 2, y, 340, 60, fill)
+        .rectangle(width / 2, y, cardWidth, cardHeight, fill)
         .setStrokeStyle(2, stroke)
         .setScrollFactor(0)
         .setDepth(20001)
         .setInteractive({ useHandCursor: true });
 
-      const text = this.add
-        .text(
-          width / 2,
-          y,
-          `${index + 1}. ${option.title}\n${option.description}`,
-          {
-            fontFamily: "monospace",
-            fontSize: "12px",
-            color: "#ffffff",
-            align: "center",
-            lineSpacing: 5,
-          },
-        )
-        .setOrigin(0.5)
+      // Moldura do ícone + ícone.
+      const iconX = left + 38;
+
+      const iconFrame = this.add
+        .rectangle(iconX, y, 52, 52, 0x0f0a1f)
+        .setStrokeStyle(1, stroke)
+        .setScrollFactor(0)
+        .setDepth(20002);
+
+      const icon = this.createUpgradeIcon(
+        this.getUpgradeId(option),
+        iconX,
+        y,
+      );
+
+      // Título e descrição (a descrição quebra de linha se for longa).
+      const textX = left + 76;
+
+      const title = this.add
+        .text(textX, y - 26, `${index + 1}. ${option.title}`, {
+          fontFamily: "monospace",
+          fontSize: "13px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setScrollFactor(0)
+        .setDepth(20002);
+
+      const description = this.add
+        .text(textX, y - 7, option.description, {
+          fontFamily: "monospace",
+          fontSize: "11px",
+          color: "#ddd6fe",
+          lineSpacing: 2,
+          wordWrap: { width: cardWidth - 76 - 12 },
+        })
         .setScrollFactor(0)
         .setDepth(20002);
 
@@ -1395,8 +1446,33 @@ private getUpgradePool(): UpgradeOption[] {
         }
       });
 
-      this.upgradeCardObjects.push(card, text);
+      this.upgradeCardObjects.push(card, iconFrame, icon, title, description);
     });
+  }
+
+  // Usa o PNG da melhoria se ele foi carregado; senão, o emoji provisório.
+  private createUpgradeIcon(
+    id: string,
+    x: number,
+    y: number,
+  ): Phaser.GameObjects.GameObject {
+    const icon = this.upgradeIcons[id];
+
+    if (icon && this.textures.exists(icon.key)) {
+      return this.add
+        .image(x, y, icon.key)
+        .setScrollFactor(0)
+        .setDepth(20003);
+    }
+
+    return this.add
+      .text(x, y, icon?.emoji ?? "?", {
+        fontFamily: "monospace",
+        fontSize: "28px",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(20003);
   }
 
   // REROLAR: sorteia 3 opções novas (gasta 1 carga).
