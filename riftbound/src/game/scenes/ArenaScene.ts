@@ -12,6 +12,11 @@ type UpgradeOption = {
   apply: () => void;
 };
 
+type UpgradeButton = {
+  box: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
+};
+
 type Projectile = {
   shape: Phaser.GameObjects.Shape;
   x: number;
@@ -197,6 +202,23 @@ export class ArenaScene extends Phaser.Scene {
   private upgradePending = false;
   private upgradeObjects: Phaser.GameObjects.GameObject[] = [];
 
+    // Reroll / Pular / Banir: cargas por partida.
+  private readonly maxUpgradeRerolls = 3;
+  private readonly maxUpgradeSkips = 3;
+  private readonly maxUpgradeBanishes = 3;
+  private rerollsLeft = 0;
+  private skipsLeft = 0;
+  private banishesLeft = 0;
+  private banishedUpgrades = new Set<string>();
+  private banishMode = false;
+
+  private currentUpgradeOptions: UpgradeOption[] = [];
+  private upgradeCardObjects: Phaser.GameObjects.GameObject[] = [];
+  private upgradeTitle!: Phaser.GameObjects.Text;
+  private rerollButton?: UpgradeButton;
+  private skipButton?: UpgradeButton;
+  private banishButton?: UpgradeButton;
+
   // Ondas e progressão
   private wave = 1;
   private enemiesRemainingInWave = 8;
@@ -367,6 +389,14 @@ export class ArenaScene extends Phaser.Scene {
   this.pendingLevelUps = 0;
   this.upgradePending = false;
   this.upgradeObjects = [];
+
+  this.upgradeCardObjects = [];
+  this.currentUpgradeOptions = [];
+  this.rerollsLeft = this.maxUpgradeRerolls;
+  this.skipsLeft = this.maxUpgradeSkips;
+  this.banishesLeft = this.maxUpgradeBanishes;
+  this.banishedUpgrades = new Set<string>();
+  this.banishMode = false;
 }
 
  preload(){
@@ -1133,83 +1163,338 @@ private getUpgradePool(): UpgradeOption[] {
   ];
 }
 
-private showUpgradeSelection() {
-  this.upgradePending = true;
-  this.upgradeObjects = [];
+  // Identificador estável: tira o "(NV 2)" do título, para o banimento
+  // continuar valendo mesmo quando a melhoria sobe de nível.
+  private getUpgradeId(option: UpgradeOption): string {
+    return option.title.replace(/\s*\(NV \d+\)$/, "");
+  }
 
-  const width = this.scale.width;
-  const height = this.scale.height;
+  // Melhorias que ainda não foram banidas.
+  private getAvailableUpgrades(): UpgradeOption[] {
+    return this.getUpgradePool().filter(
+      (option) => !this.banishedUpgrades.has(this.getUpgradeId(option)),
+    );
+  }
 
-  const overlay = this.add
-    .rectangle(width / 2, height / 2, width, height, 0x000000, 0.8)
-    .setScrollFactor(0)
-    .setDepth(20000);
+  private showUpgradeSelection() {
+    // Todas as melhorias foram banidas: não há o que escolher,
+    // então o nível é consumido sem abrir a tela.
+    if (this.getAvailableUpgrades().length === 0) {
+      this.pendingLevelUps -= 1;
+      this.updateHUD();
 
-  this.upgradeObjects.push(overlay);
+      if (this.pendingLevelUps > 0) {
+        this.showUpgradeSelection();
+      }
 
-  const title = this.add
-    .text(width / 2, height / 2 - 125, "ESCOLHA UMA MELHORIA", {
-      fontFamily: "monospace",
-      fontSize: "22px",
-      color: "#c4b5fd",
-      fontStyle: "bold",
-    })
-    .setOrigin(0.5)
-    .setScrollFactor(0)
-    .setDepth(20001);
+      return;
+    }
 
-  this.upgradeObjects.push(title);
+    this.upgradePending = true;
+    this.upgradeObjects = [];
+    this.upgradeCardObjects = [];
+    this.currentUpgradeOptions = [];
+    this.banishMode = false;
 
-  // Sorteia 3 opções diferentes entre todas as disponíveis.
-  const options = Phaser.Utils.Array.Shuffle(this.getUpgradePool()).slice(0, 3);
+    const width = this.scale.width;
+    const height = this.scale.height;
 
-  options.forEach((option, index) => {
-    const y = height / 2 - 45 + index * 75;
+    const overlay = this.add
+      .rectangle(width / 2, height / 2, width, height, 0x000000, 0.8)
+      .setScrollFactor(0)
+      .setDepth(20000);
 
-    const card = this.add
-      .rectangle(width / 2, y, 340, 60, 0x1e1b2e)
+    this.upgradeTitle = this.add
+      .text(width / 2, height / 2 - 125, "ESCOLHA UMA MELHORIA", {
+        fontFamily: "monospace",
+        fontSize: "22px",
+        color: "#c4b5fd",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(20001);
+
+    this.upgradeObjects.push(overlay, this.upgradeTitle);
+
+    // Os 3 botões ficam fixos; só as cartas mudam ao rerolar ou banir.
+    const buttonY = height / 2 + 175;
+
+    this.rerollButton = this.createUpgradeButton(width / 2 - 155, buttonY, () =>
+      this.rerollUpgrades(),
+    );
+    this.skipButton = this.createUpgradeButton(width / 2, buttonY, () =>
+      this.skipUpgrade(),
+    );
+    this.banishButton = this.createUpgradeButton(width / 2 + 155, buttonY, () =>
+      this.toggleBanishMode(),
+    );
+
+    this.rollUpgradeOptions(false);
+  }
+
+  private createUpgradeButton(
+    x: number,
+    y: number,
+    onClick: () => void,
+  ): UpgradeButton {
+    const box = this.add
+      .rectangle(x, y, 140, 38, 0x5b21b6)
       .setStrokeStyle(2, 0x8b5cf6)
       .setScrollFactor(0)
       .setDepth(20001)
       .setInteractive({ useHandCursor: true });
 
-    const text = this.add
-      .text(width / 2, y, `${index + 1}. ${option.title}\n${option.description}`, {
+    const label = this.add
+      .text(x, y, "", {
         fontFamily: "monospace",
-        fontSize: "12px",
+        fontSize: "13px",
+        fontStyle: "bold",
         color: "#ffffff",
         align: "center",
-        lineSpacing: 5,
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(20002);
 
-    card.on("pointerover", () => card.setFillStyle(0x4c1d95));
-    card.on("pointerout", () => card.setFillStyle(0x1e1b2e));
-    card.on("pointerdown", () => this.chooseUpgrade(option));
+    box.on("pointerdown", onClick);
+    box.on("pointerover", () => {
+      if (box.input?.enabled) box.setAlpha(0.85);
+    });
+    box.on("pointerout", () => box.setAlpha(1));
 
-    this.upgradeObjects.push(card, text);
-  });
-}
+    this.upgradeObjects.push(box, label);
 
-private chooseUpgrade(option: UpgradeOption) {
-  if (!this.upgradePending) return;
-
-  option.apply();
-
-  this.upgradeObjects.forEach((object) => object.destroy());
-  this.upgradeObjects = [];
-
-  this.pendingLevelUps -= 1;
-  this.upgradePending = false;
-
-  this.updateHUD();
-
-  if (this.pendingLevelUps > 0) {
-    this.showUpgradeSelection();
+    return { box, label };
   }
-}
+
+  // Atualiza texto, cor e estado (ativo/desativado) dos 3 botões.
+  private refreshUpgradeButtons() {
+    const apply = (
+      button: UpgradeButton | undefined,
+      text: string,
+      enabled: boolean,
+      highlighted = false,
+    ) => {
+      if (!button) return;
+
+      button.label.setText(text);
+      button.label.setColor(enabled ? "#ffffff" : "#6b7280");
+      button.box.setAlpha(1);
+      button.box.setFillStyle(
+        highlighted ? 0xb91c1c : enabled ? 0x5b21b6 : 0x1f1b2e,
+      );
+      button.box.setStrokeStyle(
+        2,
+        highlighted ? 0xf87171 : enabled ? 0x8b5cf6 : 0x374151,
+      );
+
+      if (enabled) {
+        button.box.setInteractive({ useHandCursor: true });
+      } else {
+        button.box.disableInteractive();
+      }
+    };
+
+    // Rerolar só faz sentido se existirem opções diferentes das da tela.
+    const canReroll =
+      this.rerollsLeft > 0 &&
+      this.getAvailableUpgrades().length > this.currentUpgradeOptions.length;
+
+    apply(
+      this.rerollButton,
+      `REROLAR ${this.rerollsLeft}/${this.maxUpgradeRerolls}`,
+      canReroll,
+    );
+
+    apply(
+      this.skipButton,
+      `PULAR ${this.skipsLeft}/${this.maxUpgradeSkips}`,
+      this.skipsLeft > 0,
+    );
+
+    apply(
+      this.banishButton,
+      this.banishMode
+        ? "CANCELAR"
+        : `BANIR ${this.banishesLeft}/${this.maxUpgradeBanishes}`,
+      this.banishMode || this.banishesLeft > 0,
+      this.banishMode,
+    );
+  }
+
+  // Sorteia até 3 opções. Ao rerolar, prioriza opções que NÃO estavam na tela.
+  private rollUpgradeOptions(avoidCurrent: boolean) {
+    const currentIds = new Set(
+      this.currentUpgradeOptions.map((option) => this.getUpgradeId(option)),
+    );
+
+    let pool: UpgradeOption[] = Phaser.Utils.Array.Shuffle(
+      this.getAvailableUpgrades(),
+    );
+
+    if (avoidCurrent) {
+      pool = [
+        ...pool.filter((option) => !currentIds.has(this.getUpgradeId(option))),
+        ...pool.filter((option) => currentIds.has(this.getUpgradeId(option))),
+      ];
+    }
+
+    this.currentUpgradeOptions = pool.slice(0, 3);
+
+    this.renderUpgradeCards();
+    this.refreshUpgradeButtons();
+  }
+
+  // Desenha as cartas. No modo banir elas ficam vermelhas.
+  private renderUpgradeCards() {
+    this.upgradeCardObjects.forEach((object) => object.destroy());
+    this.upgradeCardObjects = [];
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+
+    const fill = this.banishMode ? 0x2a1215 : 0x1e1b2e;
+    const stroke = this.banishMode ? 0xef4444 : 0x8b5cf6;
+    const hover = this.banishMode ? 0x7f1d1d : 0x4c1d95;
+
+    this.currentUpgradeOptions.forEach((option, index) => {
+      const y = height / 2 - 45 + index * 75;
+
+      const card = this.add
+        .rectangle(width / 2, y, 340, 60, fill)
+        .setStrokeStyle(2, stroke)
+        .setScrollFactor(0)
+        .setDepth(20001)
+        .setInteractive({ useHandCursor: true });
+
+      const text = this.add
+        .text(
+          width / 2,
+          y,
+          `${index + 1}. ${option.title}\n${option.description}`,
+          {
+            fontFamily: "monospace",
+            fontSize: "12px",
+            color: "#ffffff",
+            align: "center",
+            lineSpacing: 5,
+          },
+        )
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(20002);
+
+      card.on("pointerover", () => card.setFillStyle(hover));
+      card.on("pointerout", () => card.setFillStyle(fill));
+      card.on("pointerdown", () => {
+        if (this.banishMode) {
+          this.banishUpgrade(option);
+        } else {
+          this.chooseUpgrade(option);
+        }
+      });
+
+      this.upgradeCardObjects.push(card, text);
+    });
+  }
+
+  // REROLAR: sorteia 3 opções novas (gasta 1 carga).
+  private rerollUpgrades() {
+    if (!this.upgradePending || this.rerollsLeft <= 0) return;
+
+    this.rerollsLeft -= 1;
+    this.setBanishMode(false);
+    this.rollUpgradeOptions(true);
+  }
+
+  // PULAR: consome o level-up sem escolher nada (gasta 1 carga).
+  private skipUpgrade() {
+    if (!this.upgradePending || this.skipsLeft <= 0) return;
+
+    this.skipsLeft -= 1;
+    this.finishUpgradeSelection();
+  }
+
+  // BANIR: liga/desliga o modo em que o próximo clique numa carta a bane.
+  private toggleBanishMode() {
+    if (!this.upgradePending) return;
+    if (!this.banishMode && this.banishesLeft <= 0) return;
+
+    this.setBanishMode(!this.banishMode);
+    this.renderUpgradeCards();
+    this.refreshUpgradeButtons();
+  }
+
+  private setBanishMode(active: boolean) {
+    this.banishMode = active;
+
+    this.upgradeTitle.setText(
+      active ? "ESCOLHA UMA MELHORIA PARA BANIR" : "ESCOLHA UMA MELHORIA",
+    );
+    this.upgradeTitle.setColor(active ? "#f87171" : "#c4b5fd");
+  }
+
+  // Bane a melhoria pelo resto da partida (gasta 1 carga) e troca só essa carta.
+  private banishUpgrade(option: UpgradeOption) {
+    if (!this.upgradePending || this.banishesLeft <= 0) return;
+
+    this.banishedUpgrades.add(this.getUpgradeId(option));
+    this.banishesLeft -= 1;
+    this.setBanishMode(false);
+
+    const index = this.currentUpgradeOptions.indexOf(option);
+
+    const shownIds = new Set(
+      this.currentUpgradeOptions.map((shown) => this.getUpgradeId(shown)),
+    );
+
+    const candidates = this.getAvailableUpgrades().filter(
+      (candidate) => !shownIds.has(this.getUpgradeId(candidate)),
+    );
+
+    if (candidates.length > 0) {
+      this.currentUpgradeOptions[index] =
+        candidates[Phaser.Math.Between(0, candidates.length - 1)];
+    } else {
+      this.currentUpgradeOptions.splice(index, 1);
+    }
+
+    // Nada sobrou para escolher: o nível é consumido sem gastar um "pular".
+    if (this.currentUpgradeOptions.length === 0) {
+      this.finishUpgradeSelection();
+      return;
+    }
+
+    this.renderUpgradeCards();
+    this.refreshUpgradeButtons();
+  }
+
+  // Fecha a tela e segue para o próximo level-up pendente, se houver.
+  private finishUpgradeSelection() {
+    this.upgradeObjects.forEach((object) => object.destroy());
+    this.upgradeCardObjects.forEach((object) => object.destroy());
+    this.upgradeObjects = [];
+    this.upgradeCardObjects = [];
+    this.currentUpgradeOptions = [];
+    this.banishMode = false;
+
+    this.pendingLevelUps -= 1;
+    this.upgradePending = false;
+
+    this.updateHUD();
+
+    if (this.pendingLevelUps > 0) {
+      this.showUpgradeSelection();
+    }
+  }
+
+  private chooseUpgrade(option: UpgradeOption) {
+    if (!this.upgradePending) return;
+
+    option.apply();
+    this.finishUpgradeSelection();
+  }
 
 
    private drawArena() {
