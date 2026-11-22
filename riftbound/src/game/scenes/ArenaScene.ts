@@ -18,7 +18,10 @@ type UpgradeButton = {
 };
 
 type Projectile = {
-  shape: Phaser.GameObjects.Shape;
+    shape:
+    | Phaser.GameObjects.Shape
+    | Phaser.GameObjects.Sprite
+    | Phaser.GameObjects.Container;
   x: number;
   y: number;
   dirX: number;
@@ -417,6 +420,8 @@ export class ArenaScene extends Phaser.Scene {
   this.load.audio("shield-sfx", "assets/audio/shield.wav");
   this.load.audio("dash-sfx", "assets/audio/dash.wav");
   this.load.audio("arcane-explosion-sfx", "assets/audio/arcane-explosion.wav");
+  this.load.image("proj-arrow", "assets/projectiles/arrow.png");
+  this.load.image("proj-fireball", "assets/projectiles/fireball.png");
 
   this.load.spritesheet(
     "hero",
@@ -3348,6 +3353,35 @@ private updateAutoWeapons() {
     return nearest;
   }
 
+    // Usa o sprite do PixelLab se ele foi carregado; senão, o desenho provisório.
+  private createProjectileShape(
+    kind: "arrow" | "fireball",
+  ):
+    | Phaser.GameObjects.Shape
+    | Phaser.GameObjects.Sprite
+    | Phaser.GameObjects.Container {
+    if (kind === "fireball") {
+      if (this.textures.exists("proj-fireball")) {
+        // O pivô do giro fica no miolo da bola (e não no centro do quadro),
+        // assim a cauda gira ATRÁS da bola e o acerto continua no lugar certo.
+        return this.add.sprite(0, 0, "proj-fireball").setOrigin(0.7, 0.48);
+      }
+
+      return this.add.circle(0, 0, 8, 0xf97316).setStrokeStyle(3, 0xef4444);
+    }
+
+    if (this.textures.exists("proj-arrow")) {
+      // A flecha é escura e pequena: um brilho violeta atrás dela a mantém
+      // visível sobre o chão da arena.
+      const glow = this.add.circle(2, 0, 8, 0xc4b5fd, 0.3);
+      const arrow = this.add.sprite(0, 0, "proj-arrow");
+
+      return this.add.container(0, 0, [glow, arrow]);
+    }
+
+    return this.add.rectangle(0, 0, 16, 3, 0xfde68a);
+  }
+
   private fireProjectile(kind: "arrow" | "fireball", damage: number) {
     const target = this.getNearestEnemy();
 
@@ -3363,9 +3397,7 @@ private updateAutoWeapons() {
   const dirY = dy / distance;
   const isFireball = kind === "fireball";
 
-  const shape: Phaser.GameObjects.Shape = isFireball
-    ? this.add.circle(0, 0, 8, 0xf97316).setStrokeStyle(3, 0xef4444)
-    : this.add.rectangle(0, 0, 16, 3, 0xfde68a);
+  const shape = this.createProjectileShape(kind);
 
   // Gira a flecha para apontar na direção visual (isométrica).
   shape.setRotation(
