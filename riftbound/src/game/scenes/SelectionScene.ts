@@ -104,6 +104,7 @@ export class SelectionScene extends Phaser.Scene {
 
   private hero!: Phaser.GameObjects.Sprite;
   private squashTween?: Phaser.Tweens.Tween;
+  private backgroundMusic?: Phaser.Sound.BaseSound;
 
   private title!: Phaser.GameObjects.Text;
   private titleLine!: Phaser.GameObjects.Rectangle;
@@ -135,6 +136,10 @@ export class SelectionScene extends Phaser.Scene {
         });
       }
     });
+    this.load.audio(
+      "selection-music",
+      "assets/audio/dark-fantasy-orchestral-cinematic-medieval-fanta.wav"
+    );
   }
 
   create() {
@@ -162,6 +167,21 @@ export class SelectionScene extends Phaser.Scene {
     this.accent = this.getTheme(CHARACTER_CLASSES[this.selectedIndex]).color;
 
     this.cameras.main.fadeIn(300, 0, 0, 0);
+
+    // Música ambiente da seleção de personagens.
+    this.backgroundMusic = this.sound.add("selection-music", {
+      loop: true,
+      volume: 0.35,
+    });
+
+    this.backgroundMusic.play();
+
+    // Para a música quando a cena for encerrada.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.backgroundMusic?.stop();
+      this.backgroundMusic?.destroy();
+      this.backgroundMusic = undefined;
+    });
 
     this.createAttackAnimations();
     this.createBackground();
