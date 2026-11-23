@@ -6,6 +6,12 @@ export class MenuScene extends Phaser.Scene {
     super("MenuScene");
   }
 
+  private backgroundMusic?: Phaser.Sound.BaseSound;
+
+  preload() {
+    this.load.audio("menu-music", "assets/audio/menu.wav");
+  }
+
   create() {
     const { width, height } = this.scale;
 
@@ -15,6 +21,21 @@ export class MenuScene extends Phaser.Scene {
 
     this.registry.set("sfxVolume", settings.sfxVolume);
     this.registry.set("musicVolume", settings.musicVolume);
+
+    // Música ambiente do menu principal.
+    this.backgroundMusic = this.sound.add("menu-music", {
+      loop: true,
+      volume: settings.musicVolume,
+    });
+
+    this.backgroundMusic.play();
+
+    // Para a música quando o jogador sair do menu.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.backgroundMusic?.stop();
+      this.backgroundMusic?.destroy();
+      this.backgroundMusic = undefined;
+    });
 
     // Brilho decorativo central
     const glow = this.add.graphics();
