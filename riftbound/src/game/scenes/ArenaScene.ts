@@ -434,7 +434,7 @@ export class ArenaScene extends Phaser.Scene {
     this.load.spritesheet(
     "hero-assassin",
     "assets/characters/assassin/Cutthroat_full.png",
-    { frameWidth: 64, frameHeight: 64 }
+    { frameWidth: 68, frameHeight: 68 }
   );
 
   this.load.spritesheet(
@@ -660,56 +660,57 @@ export class ArenaScene extends Phaser.Scene {
   }
 
 
-     private createPixelLabAnimations(
-    textureKey: string,
-    walkFirstRow: number,
-    attackFirstRow: number
-  ) {
-    const columns = 16;
+private createPixelLabAnimations(
+  textureKey: string,
+  walkFirstRow: number,
+  attackFirstRow: number,
+  layout: { columns?: number; walkFrames?: number; attackFrames?: number;
+            walkFrameRate?: number; attackFrameRate?: number } = {}
+) {
+  const columns = layout.columns ?? 16;
+  const walkFrames = layout.walkFrames ?? 8;
+  const attackFrames = layout.attackFrames ?? 16;
+  const walkFrameRate = layout.walkFrameRate ?? 10;
+  const attackFrameRate = layout.attackFrameRate ?? 32;
 
-    const directions = [
-      { name: "south", index: 0 },
-      { name: "east", index: 2 },
-      { name: "north", index: 4 },
-      { name: "west", index: 6 },
-    ];
+  const directions = [
+    { name: "south", index: 0 },
+    { name: "east", index: 2 },
+    { name: "north", index: 4 },
+    { name: "west", index: 6 },
+  ];
 
-    for (const direction of directions) {
-      // Idle: um quadro por direção (linha 0).
-      this.anims.create({
-        key: `${textureKey}-idle-${direction.name}`,
-        frames: [{ key: textureKey, frame: direction.index }],
-        frameRate: 1,
-        repeat: -1,
-      });
+  for (const direction of directions) {
+    this.anims.create({
+      key: `${textureKey}-idle-${direction.name}`,
+      frames: [{ key: textureKey, frame: direction.index }],
+      frameRate: 1,
+      repeat: -1,
+    });
 
-      // Walk: 8 quadros.
-      const walkStart = (walkFirstRow + direction.index) * columns;
+    const walkStart = (walkFirstRow + direction.index) * columns;
+    this.anims.create({
+      key: `${textureKey}-walk-${direction.name}`,
+      frames: this.anims.generateFrameNumbers(textureKey, {
+        start: walkStart,
+        end: walkStart + walkFrames - 1,
+      }),
+      frameRate: walkFrameRate,
+      repeat: -1,
+    });
 
-      this.anims.create({
-        key: `${textureKey}-walk-${direction.name}`,
-        frames: this.anims.generateFrameNumbers(textureKey, {
-          start: walkStart,
-          end: walkStart + 7,
-        }),
-        frameRate: 10,
-        repeat: -1,
-      });
-
-      // Ataque: 16 quadros.
-      const attackStart = (attackFirstRow + direction.index) * columns;
-
-      this.anims.create({
-        key: `${textureKey}-attack-${direction.name}`,
-        frames: this.anims.generateFrameNumbers(textureKey, {
-          start: attackStart,
-          end: attackStart + 15,
-        }),
-        frameRate: 32,
-        repeat: 0,
-      });
-    }
+    const attackStart = (attackFirstRow + direction.index) * columns;
+    this.anims.create({
+      key: `${textureKey}-attack-${direction.name}`,
+      frames: this.anims.generateFrameNumbers(textureKey, {
+        start: attackStart,
+        end: attackStart + attackFrames - 1,
+      }),
+      frameRate: attackFrameRate,
+      repeat: 0,
+    });
   }
+}
 
   private checkDashDamage(): void {
     if (this.time.now >= this.dashUntil) return;
@@ -1011,7 +1012,13 @@ private createHeroAnimations() {
 
 
     this.createPixelLabAnimations("hero", 9, 1);
-    this.createPixelLabAnimations("hero-assassin", 1, 9);
+    this.createPixelLabAnimations("hero-assassin", 1, 9, {
+      columns: 9,
+      walkFrames: 9,
+      attackFrames: 9,
+      walkFrameRate: 11,
+      attackFrameRate: 18,   
+    });
     this.createPixelLabAnimations("hero-mage", 9, 1);
 
 }
@@ -2555,13 +2562,19 @@ private healPlayer(amount: number) {
       this.worldY
     );
 
+    const origins: Record<string, number> = {
+      hero: 56 / 68,
+      "hero-assassin": 56 / 68,
+      "hero-mage": 79 / 94,
+    };
+
     this.player = this.add.sprite(
       position.x,
       position.y,
       this.heroTexture
     );
 
-    this.player.setOrigin(0.5, this.heroTexture === "hero" ? 56 / 68 : 79 / 94);
+    this.player.setOrigin(0.5, origins[this.heroTexture] ?? 56 / 68);
     this.player.setScale(1);
     this.player.setDepth(position.y);
 

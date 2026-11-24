@@ -44,7 +44,7 @@ const HERO_SHEETS: Record<string, HeroSheet> = {
   },
   "hero-assassin": {
     path: "assets/characters/assassin/Cutthroat_full.png",
-    size: 64,
+    size: 68,
     attackRow: 9,
     originY: 79 / 94,
   },
