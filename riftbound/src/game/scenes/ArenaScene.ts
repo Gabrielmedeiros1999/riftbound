@@ -142,6 +142,10 @@ export class ArenaScene extends Phaser.Scene {
 
   // Controle do tempo entre ataques.
   private readonly attackCooldown = 350;
+  private readonly attackRange = 1.7;        // alcance do golpe (era 1.35)
+  private readonly attackConeDot = 0.25;     // cone mais largo (era 0.5)
+  private readonly attackAimRange = 2.4;     // distância máxima da auto-mira
+  private readonly attackLungeDistance = 0.45; // avanço do personagem ao atacar
   private nextAttackTime = 0;
 
   // Inimigos atualmente vivos na arena.
@@ -2485,12 +2489,12 @@ private getUpgradePool(): UpgradeOption[] {
       const dy = enemy.y - this.worldY;
       const distance = Math.hypot(dx, dy);
 
-      if (distance === 0 || distance > 1.35) continue;
+    if (distance === 0 || distance > this.attackRange) continue;
 
-      // Só acerta se o inimigo estiver à frente.
-      const dot = (dx / distance) * facingX + (dy / distance) * facingY;
+    const dot = (dx / distance) * facingX + (dy / distance) * facingY;
 
-      if (dot < 0.5) continue;
+    // Inimigo colado em você sempre é atingido; os demais precisam estar no cone.
+    if (distance > 0.7 && dot < this.attackConeDot) continue;
 
       this.hitEnemy(enemy, this.playerDamage);
       this.healPlayer(this.lifeStealPerHit);
@@ -2710,6 +2714,58 @@ private createHitEffect(
   }
 }
 
+// Vira o personagem para o inimigo mais próximo dentro do alcance da auto-mira.
+private aimAtNearestEnemy(): Enemy | null {
+  let nearest: Enemy | null = null;
+  let best = this.attackAimRange;
+
+  for (const enemy of this.enemies) {
+    if (!enemy.alive) continue;
+    const d = Math.hypot(enemy.x - this.worldX, enemy.y - this.worldY);
+    if (d < best) {
+      best = d;
+      nearest = enemy;
+    }
+  }
+
+  if (!nearest) return null;
+
+  const dx = nearest.x - this.worldX;
+  const dy = nearest.y - this.worldY;
+
+  this.facingX = dx;
+  this.facingY = dy;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    this.facingDirection = dx > 0 ? "east" : "west";
+  } else {
+    this.facingDirection = dy > 0 ? "south" : "north";
+  }
+
+  return nearest;
+}
+
+// Pequeno avanço na direção do alvo, para o golpe alcançar quem está se afastando.
+private lungeToward(target: Enemy) {
+  const dx = target.x - this.worldX;
+  const dy = target.y - this.worldY;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < 0.9) return; // já está colado, não precisa avançar
+
+  const step = Math.min(this.attackLungeDistance, dist - 0.8);
+  const nextX = Phaser.Math.Clamp(
+    this.worldX + (dx / dist) * step, 0.2, this.arenaSize - 0.2
+  );
+  const nextY = Phaser.Math.Clamp(
+    this.worldY + (dy / dist) * step, 0.2, this.arenaSize - 0.2
+  );
+
+  if (!this.collidesAt(nextX, this.worldY)) this.worldX = nextX;
+  if (!this.collidesAt(this.worldX, nextY)) this.worldY = nextY;
+
+  this.updatePlayerPosition();
+}
 
   private performAttack() {
 
@@ -2721,6 +2777,10 @@ private createHitEffect(
     }
 
     this.isAttacking = true;
+
+    const target = this.aimAtNearestEnemy();
+    if (target) this.lungeToward(target);
+
     this.playHeroAnimation("attack");
     this.playSfx("sword", 0.45);
 
