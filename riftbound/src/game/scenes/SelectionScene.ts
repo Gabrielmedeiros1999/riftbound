@@ -91,6 +91,9 @@ export class SelectionScene extends Phaser.Scene {
   private accentTween?: Phaser.Tweens.Tween;
 
   private isStarting = false;
+  private isRolling = false; // sorteio em andamento
+  private randomButton!: Phaser.GameObjects.Container;
+  private randomIcon!: Phaser.GameObjects.Text;
   private isSwapping = false;
   private isShowcase = false;
   private showcaseId = 0;
@@ -150,6 +153,7 @@ export class SelectionScene extends Phaser.Scene {
     this.cards = [];
     this.statRows = [];
     this.isStarting = false;
+    this.isRolling = false;
     this.isSwapping = false;
     this.isShowcase = false;
     this.showcaseId = 0;
@@ -189,6 +193,7 @@ export class SelectionScene extends Phaser.Scene {
     this.createTitle();
     this.createStage();
     this.createCards();
+    this.createRandomButton();
     this.createInfoPanel();
     this.createButtons();
     this.createInput();
@@ -784,6 +789,121 @@ export class SelectionScene extends Phaser.Scene {
     });
   }
 
+    // Botão "ALEATÓRIO" logo abaixo da lista de classes.
+  private createRandomButton() {
+    const x = 24 + 236 / 2;
+    const y = 508;
+
+    const bg = this.add
+      .rectangle(0, 0, 236, 44, 0x16121c)
+      .setStrokeStyle(2, 0x3b3347);
+
+    this.randomIcon = this.add
+      .text(-86, 0, "🎲", { fontFamily: MONO, fontSize: "22px" })
+      .setOrigin(0.5);
+
+    const label = this.add
+      .text(-56, 0, "ALEATÓRIO", {
+        fontFamily: MONO,
+        fontSize: "15px",
+        fontStyle: "bold",
+        color: "#c4b8da",
+      })
+      .setOrigin(0, 0.5);
+
+    // Lembrete da tecla de atalho.
+    const hint = this.add
+      .text(104, 0, "R", {
+        fontFamily: MONO,
+        fontSize: "11px",
+        fontStyle: "bold",
+        color: "#6f6585",
+      })
+      .setOrigin(0.5);
+
+    this.randomButton = this.add
+      .container(x, y, [bg, this.randomIcon, label, hint])
+      .setDepth(20);
+
+    // Cresce ao passar o mouse (parando o tween anterior para não brigar).
+    let scaleTween: Phaser.Tweens.Tween | undefined;
+
+    const scaleTo = (scale: number) => {
+      scaleTween?.stop();
+      scaleTween = this.tweens.add({
+        targets: this.randomButton,
+        scale,
+        duration: 120,
+        ease: "Back.easeOut",
+      });
+    };
+
+    bg.setInteractive({ useHandCursor: true });
+
+    bg.on("pointerover", () => {
+      bg.setFillStyle(0x221b2c);
+      bg.setStrokeStyle(2, this.accent);
+      scaleTo(1.05);
+    });
+
+    bg.on("pointerout", () => {
+      bg.setFillStyle(0x16121c);
+      bg.setStrokeStyle(2, 0x3b3347);
+      scaleTo(1);
+    });
+
+    bg.on("pointerdown", () => this.rollRandomClass());
+  }
+
+  // Sorteia a classe: o destaque percorre as classes cada vez mais devagar,
+  // como uma roleta, e para na sorteada. Com startAfter = true, a partida
+  // começa sozinha logo depois do resultado.
+  private rollRandomClass(startAfter = false) {
+    const total = CHARACTER_CLASSES.length;
+
+    if (this.isRolling || this.isStarting || total < 2) return;
+
+    this.isRolling = true;
+
+    const target = Phaser.Math.Between(0, total - 1);
+
+    // Tempo (ms) entre cada passo: começa rápido e desacelera.
+    const delays = [70, 70, 80, 90, 110, 140, 180, 230, 300, 380];
+    const steps = delays.length;
+    const duration = delays.reduce((sum, delay) => sum + delay, 0);
+
+    // O dado gira durante o sorteio.
+    this.randomIcon.setAngle(0);
+
+    this.tweens.add({
+      targets: this.randomIcon,
+      angle: 720,
+      duration,
+      ease: "Cubic.easeOut",
+    });
+
+    let elapsed = 0;
+
+    for (let step = 0; step < steps; step++) {
+      elapsed += delays[step];
+
+      // Os índices avançam de um em um e o último cai exatamente no sorteado.
+      const index = (((target - (steps - 1 - step)) % total) + total) % total;
+
+      this.time.delayedCall(elapsed, () => {
+        this.selectClass(index, true);
+
+        if (step === steps - 1) {
+          this.isRolling = false;
+
+          if (startAfter) {
+            this.time.delayedCall(900, () => this.startGame());
+          }
+        }
+      });
+    }
+  }
+
   // Painel à direita: atributos (barras animadas) e habilidade.
   private createInfoPanel() {
     const { width } = this.scale;
@@ -1009,7 +1129,7 @@ export class SelectionScene extends Phaser.Scene {
       .text(
         width / 2,
         height - 18,
-        "SETAS: ESCOLHER   ·   ENTER: INICIAR   ·   ESC: VOLTAR",
+        "SETAS: ESCOLHER   ·   R: ALEATÓRIO   ·   ENTER: INICIAR   ·   ESC: VOLTAR",
         { fontFamily: MONO, fontSize: "11px", color: "#6f6585" },
       )
       .setOrigin(0.5)
@@ -1033,6 +1153,8 @@ export class SelectionScene extends Phaser.Scene {
       keyboard.on(`keydown-${key}`, () => this.startGame()),
     );
 
+    keyboard.on("keydown-R", () => this.rollRandomClass());
+
     keyboard.on("keydown-ESC", () => this.goBack());
   }
 
@@ -1046,7 +1168,9 @@ export class SelectionScene extends Phaser.Scene {
     this.selectClass((this.selectedIndex + delta + total) % total);
   }
 
-  private selectClass(index: number) {
+  private selectClass(index: number, fromRoll = false) {
+    // Durante o sorteio, só o próprio sorteio pode trocar de classe.
+    if (this.isRolling && !fromRoll) return;
     if (this.isStarting || index === this.selectedIndex) return;
 
     this.selectedIndex = index;
@@ -1232,6 +1356,20 @@ export class SelectionScene extends Phaser.Scene {
       });
     });
 
+    // O botão "Aleatório" entra logo depois das cartas.
+    const randomX = this.randomButton.x;
+
+    this.randomButton.setX(randomX - 300).setAlpha(0);
+
+    this.tweens.add({
+      targets: this.randomButton,
+      x: randomX,
+      alpha: 1,
+      duration: 450,
+      delay: 150 + this.cards.length * 90,
+      ease: "Back.easeOut",
+    });
+
     // Painel entra pela direita.
     const panelX = this.panel.x;
     this.panel.setX(panelX + 90).setAlpha(0);
@@ -1298,7 +1436,7 @@ export class SelectionScene extends Phaser.Scene {
   }
 
   private startGame() {
-    if (this.isStarting) return;
+    if (this.isStarting || this.isRolling) return;
 
     this.isStarting = true;
 
