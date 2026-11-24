@@ -4,6 +4,10 @@ import { getMatchHistory } from "../utils/history";
 
 type EndSceneData = {
   result: "victory" | "defeat";
+  wave?: number;
+  bestWave?: number;
+  survivalTime?: number; // em segundos
+  stage?: number;
 };
 
 export class EndScene extends Phaser.Scene {
@@ -16,6 +20,8 @@ export class EndScene extends Phaser.Scene {
     const victory = data.result === "victory";
     const bestWave = getBestWave();
     const history = getMatchHistory();
+    const survivalLabel = `TEMPO VIVO: ${this.formatTime(data.survivalTime ?? 0)}`;
+
 
     this.cameras.main.setBackgroundColor("#0b0812");
 
@@ -41,8 +47,8 @@ export class EndScene extends Phaser.Scene {
         width / 2,
         height * 0.24,
         victory
-          ? "Você sobreviveu às fendas."
-          : `A arena consumiu você.\nRECORDE: ONDA ${bestWave}`,
+          ? `Você derrotou o Guardião da Fenda.\n${survivalLabel}\nRECORDE: ONDA ${bestWave}`
+          : `A arena consumiu você.\n${survivalLabel}\nRECORDE: ONDA ${bestWave}`,
         {
           fontFamily: "monospace",
           fontSize: "14px",
@@ -101,6 +107,13 @@ export class EndScene extends Phaser.Scene {
         color: "#6b7280",
       })
       .setOrigin(0.5);
+  }
+
+  private formatTime(totalSeconds: number): string {
+    const s = Math.max(0, Math.floor(totalSeconds));
+    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
   }
 
   private createButton(

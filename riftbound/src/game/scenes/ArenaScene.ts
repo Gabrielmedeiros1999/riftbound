@@ -51,6 +51,8 @@ type Enemy = {
   container: Phaser.GameObjects.Container;
   sprite: Phaser.GameObjects.Sprite;
   healthBar: Phaser.GameObjects.Graphics;
+  shadow?: boolean; // inimigo sombra (aparece depois do portal)
+  boss?: boolean;   // chefe do estágio final
 };
 
 // Projétil disparado por um inimigo (cuspidor).
@@ -116,6 +118,9 @@ export class ArenaScene extends Phaser.Scene {
   private dashUntil = 0;
   private dashDirX = 0;
   private dashDirY = 0;
+
+  private nextHitSfxTime = 0;
+  private readonly hitSfxCooldown = 90; // ms entre sons de acerto
 
   private matchStartTime = 0;
 
@@ -239,6 +244,27 @@ export class ArenaScene extends Phaser.Scene {
   // Ondas e progressão
   private wave = 1;
   private enemiesRemainingInWave = 8;
+
+  // Estágios e portal
+  private readonly stageDuration = 10 * 60 * 1000; // 10:00 (para testar: 20_000)
+  private readonly finalStage = 3;
+  private currentStage = 1;
+  private stagePhase: "normal" | "portal" | "boss" = "normal";
+  private stageTimeLeft = 10 * 60 * 1000;
+  private survivalMs = 0;      // tempo vivo (não conta pausa nem menu de upgrade)
+  private overtimeMs = 0;      // tempo desde que o portal abriu
+  private shadowSpawnTimer = 0;
+  private bossDefeated = false;
+  private bossEnemy?: Enemy;
+  private nextBossShotTime = 0;
+  private portal?: {
+    x: number;
+    y: number;
+    container: Phaser.GameObjects.Container;
+  };
+  private arenaTiles: Phaser.GameObjects.Image[] = [];
+  private stageText!: Phaser.GameObjects.Text;
+  private bossBar!: Phaser.GameObjects.Graphics;
   
 
   private xp = 0;
@@ -414,6 +440,18 @@ export class ArenaScene extends Phaser.Scene {
   this.banishesLeft = this.maxUpgradeBanishes;
   this.banishedUpgrades = new Set<string>();
   this.banishMode = false;
+
+  // ondas
+  this.currentStage = 1;
+  this.stagePhase = "normal";
+  this.stageTimeLeft = this.stageDuration;
+  this.survivalMs = 0;
+  this.overtimeMs = 0;
+  this.shadowSpawnTimer = 0;
+  this.bossDefeated = false;
+  this.bossEnemy = undefined;
+  this.portal = undefined;
+  this.arenaTiles = [];
 }
 
  preload(){
@@ -575,6 +613,7 @@ export class ArenaScene extends Phaser.Scene {
     this.setupCamera();
     this.fillEnemies();
     this.createHUD();
+    this.createStageHUD();
     this.matchStartTime = Date.now();
     this.totalEnemiesDefeated = 0;
 
@@ -801,6 +840,14 @@ private createPixelLabAnimations(
     );
   }
 
+ // Toca o som de acerto no máximo uma vez a cada hitSfxCooldown ms.
+private playHitSfx(volume = 0.6) {
+  const now = this.time.now;
+  if (now < this.nextHitSfxTime) return;
+
+  this.nextHitSfxTime = now + this.hitSfxCooldown;
+  this.playSfx("hit", volume);
+} 
 
 private playSfx(key: string, volume = 0.5) {
   if (!this.cache.audio.exists(key)) {
@@ -1611,6 +1658,7 @@ private getUpgradePool(): UpgradeOption[] {
         tile.setOrigin(0.5, 27.5 / 64);
         tile.setScale(64 / 54, 32 / 35);
         tile.setDepth(-1000 + x + y);
+        this.arenaTiles.push(tile);
       }
     }
   }
@@ -1743,7 +1791,7 @@ private getUpgradePool(): UpgradeOption[] {
 
   // Agenda o surgimento de inimigos até preencher o limite simultâneo.
   private fillEnemies() {
-    if (this.gameOver) return;
+    if (this.gameOver || this.stagePhase !== "normal") return;
 
     const freeSlots =
       this.getMaxConcurrentEnemies() -
@@ -1765,7 +1813,7 @@ private getUpgradePool(): UpgradeOption[] {
   }
 
   private spawnEnemy() {
-    if (this.gameOver) return;
+    if (this.gameOver || this.stagePhase !== "normal") return;
 
     const margin = 0.8;
     const max = this.arenaSize - margin;
@@ -1899,7 +1947,12 @@ private getUpgradePool(): UpgradeOption[] {
 
     this.dropXpGem(enemy);
     this.totalEnemiesDefeated++;
-    this.enemiesRemainingInWave -= 1;
+
+    if (enemy.boss) this.onBossDefeated();
+
+    if (!enemy.shadow && !enemy.boss) {
+      this.enemiesRemainingInWave -= 1;
+    }
 
     // Última criatura da onda: todas as gemas voam até o jogador.
     if (this.enemiesRemainingInWave <= 0) {
@@ -1911,7 +1964,7 @@ private getUpgradePool(): UpgradeOption[] {
     this.updateHUD();
 
     this.time.delayedCall(800, () => {
-      if (this.gameOver) return;
+      if (this.gameOver || this.stagePhase !== "normal") return;
 
       if (this.enemiesRemainingInWave > 0) {
         // Ainda existem inimigos nesta onda: repõe os que faltam.
@@ -2459,7 +2512,7 @@ private getUpgradePool(): UpgradeOption[] {
     });
 
     this.cameras.main.shake(160, 0.006);
-    this.playSfx("hit", 0.9);
+    this.playHitSfx(0.9);
 
     // Ffere o jogador se estiver no raio.
     if (Math.hypot(this.worldX - enemy.x, this.worldY - enemy.y) <= radius) {
@@ -2507,7 +2560,7 @@ private getUpgradePool(): UpgradeOption[] {
     if (!enemy.alive) return;
 
     enemy.health -= amount;
-    this.playSfx("hit", 0.6);
+    this.playHitSfx(0.6);
 
     this.showDamageNumber(enemy.container.x, enemy.container.y, amount);
 
@@ -2860,6 +2913,377 @@ private lungeToward(target: Enemy) {
       slash.destroy();
     });
   }
+
+  // ---------------------------------------------------------------------
+// Estágios, portal, sombras e chefe
+// ---------------------------------------------------------------------
+
+private formatTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+private createStageHUD() {
+  this.stageText = this.add
+    .text(this.scale.width / 2, 118, "", {
+      fontFamily: "monospace",
+      fontSize: "18px",
+      fontStyle: "bold",
+      color: "#e9d5ff",
+      backgroundColor: "#0b0812",
+      padding: { x: 14, y: 8 },
+      align: "center",
+    })
+    .setOrigin(0.5, 0)
+    .setScrollFactor(0)
+    .setDepth(10001);
+
+  this.bossBar = this.add.graphics().setScrollFactor(0).setDepth(10001);
+}
+
+private updateStageHUD() {
+  const head = `ESTÁGIO ${this.currentStage}/${this.finalStage}`;
+
+  if (this.stagePhase === "normal") {
+    this.stageText.setText(
+      `${head}   TEMPO ${this.formatTime(Math.ceil(this.stageTimeLeft / 1000))}`,
+    );
+  } else if (this.stagePhase === "boss") {
+    this.stageText.setText(`${head}   GUARDIÃO DA FENDA`);
+  } else {
+    this.stageText.setText(
+      this.bossDefeated
+        ? "CHEFE DERROTADO - ENTRE NA SAÍDA OU SOBREVIVA ÀS SOMBRAS"
+        : "O PORTAL ABRIU - ENTRE NELE ANTES QUE AS SOMBRAS CHEGUEM",
+    );
+  }
+
+  // Barra de vida grande do chefe.
+  this.bossBar.clear();
+  const boss = this.bossEnemy;
+
+  if (boss && boss.alive) {
+    const w = Math.min(this.scale.width - 120, 520);
+    const x = (this.scale.width - w) / 2;
+    const ratio = Phaser.Math.Clamp(boss.health / boss.maxHealth, 0, 1);
+
+    this.bossBar.fillStyle(0x1f2937, 0.95);
+    this.bossBar.fillRoundedRect(x, 160, w, 16, 6);
+    this.bossBar.fillStyle(0xdc2626, 1);
+    this.bossBar.fillRoundedRect(x, 160, w * ratio, 16, 6);
+    this.bossBar.lineStyle(2, 0xfecaca, 0.9);
+    this.bossBar.strokeRoundedRect(x, 160, w, 16, 6);
+  }
+}
+
+private showStageBanner(text: string) {
+  const banner = this.add
+    .text(this.scale.width / 2, this.scale.height * 0.3, text, {
+      fontFamily: "monospace",
+      fontSize: "32px",
+      fontStyle: "bold",
+      color: "#f5f3ff",
+      stroke: "#2e1065",
+      strokeThickness: 6,
+    })
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(10002);
+
+  this.tweens.add({
+    targets: banner,
+    alpha: 0,
+    y: banner.y - 30,
+    delay: 1800,
+    duration: 700,
+    onComplete: () => banner.destroy(),
+  });
+}
+
+private updateStageSystem(delta: number) {
+  this.survivalMs += delta;
+
+  if (this.stagePhase === "normal") {
+    this.stageTimeLeft -= delta;
+    if (this.stageTimeLeft <= 0) this.openPortal();
+  } else if (this.stagePhase === "portal") {
+    this.overtimeMs += delta;
+    this.updateShadows(delta);
+    this.checkPortalEntry();
+  } else {
+    this.updateBoss();
+  }
+
+  this.updateStageHUD();
+}
+
+// Procura um ponto livre ao redor do jogador.
+private findSpawnPoint(minDist: number, maxDist: number) {
+  const margin = 0.8;
+  const max = this.arenaSize - margin;
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    const distance = Phaser.Math.FloatBetween(minDist, maxDist);
+    const x = this.worldX + Math.cos(angle) * distance;
+    const y = this.worldY + Math.sin(angle) * distance;
+
+    if (x < margin || y < margin || x > max || y > max) continue;
+    if (this.collidesAt(x, y)) continue;
+    if (this.enemies.some((e) => Math.hypot(e.x - x, e.y - y) < 1.2)) continue;
+
+    return { x, y };
+  }
+
+  return { x: this.arenaSize / 2, y: this.arenaSize / 2 };
+}
+
+// ----- Portal -----
+
+private openPortal() {
+  this.stagePhase = "portal";
+  this.overtimeMs = 0;
+  this.shadowSpawnTimer = 0;
+  this.enemiesToSpawn = 0; // para de agendar inimigos comuns
+
+  const spot = this.findSpawnPoint(4, 6);
+  const pos = this.projectPosition(spot.x, spot.y);
+
+  const container = this.add.container(pos.x, pos.y).setDepth(pos.y);
+  const glow = this.add.ellipse(0, -20, 70, 90, 0x7c3aed, 0.35);
+  const core = this.add.ellipse(0, -20, 38, 56, 0x4c1d95, 0.95);
+  const ring = this.add.ellipse(0, -20, 54, 74, 0x000000, 0);
+  ring.setStrokeStyle(4, 0xc4b5fd);
+
+  const label = this.add
+    .text(0, -78, this.currentStage >= this.finalStage ? "SAÍDA" : "PORTAL", {
+      fontFamily: "monospace",
+      fontSize: "14px",
+      fontStyle: "bold",
+      color: "#ede9fe",
+    })
+    .setOrigin(0.5);
+
+  container.add([glow, core, ring, label]);
+
+  this.tweens.add({
+    targets: glow,
+    scaleX: 1.3,
+    scaleY: 1.15,
+    alpha: 0.12,
+    duration: 700,
+    yoyo: true,
+    repeat: -1,
+  });
+  this.tweens.add({
+    targets: ring,
+    scaleX: 1.12,
+    scaleY: 1.08,
+    duration: 500,
+    yoyo: true,
+    repeat: -1,
+  });
+
+  this.portal = { x: spot.x, y: spot.y, container };
+  this.showStageBanner(
+    this.currentStage >= this.finalStage ? "A SAÍDA SE ABRIU!" : "O PORTAL SE ABRIU!",
+  );
+}
+
+private checkPortalEntry() {
+  if (!this.portal) return;
+
+  const dist = Math.hypot(this.portal.x - this.worldX, this.portal.y - this.worldY);
+  if (dist > 0.8) return;
+
+  this.portal.container.destroy();
+  this.portal = undefined;
+
+  if (this.currentStage >= this.finalStage) {
+    this.endRun("victory");
+    return;
+  }
+
+  this.startStage(this.currentStage + 1);
+}
+
+private startStage(stage: number) {
+  this.currentStage = stage;
+  this.overtimeMs = 0;
+
+  this.clearAllEnemies();
+  this.attractAllGems();
+
+  this.worldX = this.arenaSize / 2;
+  this.worldY = this.arenaSize / 2;
+  this.updatePlayerPosition();
+
+  this.applyStageTheme();
+  this.cameras.main.flash(600, 196, 181, 253);
+
+  if (stage >= this.finalStage) {
+    this.stagePhase = "boss";
+    this.enemiesRemainingInWave = 0;
+    this.enemiesToSpawn = 0;
+    this.showStageBanner("ESTÁGIO FINAL");
+
+    this.time.delayedCall(2000, () => {
+      if (!this.gameOver) this.spawnBoss();
+    });
+  } else {
+    this.stagePhase = "normal";
+    this.stageTimeLeft = this.stageDuration;
+    this.enemiesRemainingInWave = this.getWaveEnemyCount(this.wave);
+    this.enemiesToSpawn = this.enemiesRemainingInWave;
+    this.showStageBanner(`ESTÁGIO ${stage}`);
+    this.fillEnemies();
+  }
+
+  this.updateHUD();
+}
+
+private applyStageTheme() {
+  const tints = [0xffffff, 0xd9a066, 0x9d8cff]; // estágios 1, 2, 3
+  const tint = tints[this.currentStage - 1] ?? 0xffffff;
+
+  for (const tile of this.arenaTiles) tile.setTint(tint);
+}
+
+private clearAllEnemies() {
+  for (const enemy of [...this.enemies]) {
+    enemy.alive = false;
+    this.createEnemyDeathEffect(
+      enemy.container.x,
+      enemy.container.y,
+      this.getEnemyColor(enemy.type),
+    );
+    enemy.container.destroy();
+  }
+  this.enemies = [];
+  this.bossEnemy = undefined;
+
+  for (const p of this.enemyProjectiles) p.shape.destroy();
+  this.enemyProjectiles = [];
+}
+
+// ----- Sombras -----
+
+private updateShadows(delta: number) {
+  this.shadowSpawnTimer += delta;
+
+  // Dificuldade cresce com o tempo no estágio e com o número do estágio.
+  const minutes = this.overtimeMs / 60000 + (this.currentStage - 1) * 0.75;
+
+  const interval = Math.max(450, 2200 - minutes * 450); // ms entre spawns
+  const maxShadows = Math.min(6 + Math.floor(minutes * 3), 40);
+
+  if (this.shadowSpawnTimer < interval) return;
+  this.shadowSpawnTimer = 0;
+
+  const alive = this.enemies.filter((e) => e.shadow).length;
+  if (alive >= maxShadows) return;
+
+  this.spawnShadow(minutes);
+}
+
+private spawnShadow(minutes: number) {
+  const spot = this.findSpawnPoint(4, 7);
+  const enemy = this.createEnemy(this.pickEnemyType(), spot.x, spot.y);
+
+  const hpMult = 1 + minutes * 0.4;
+  const speedMult = Math.min(1 + minutes * 0.08, 1.5);
+
+  enemy.shadow = true;
+  enemy.maxHealth = Math.ceil(enemy.maxHealth * hpMult);
+  enemy.health = enemy.maxHealth;
+  enemy.speed *= speedMult;
+  enemy.sprite.setTint(0x2e1065);
+
+  this.updateEnemyHealthBar(enemy);
+  this.enemies.push(enemy);
+}
+
+// ----- Chefe -----
+
+private spawnBoss() {
+  const spot = this.findSpawnPoint(5, 7);
+  const boss = this.createEnemy("brute", spot.x, spot.y);
+
+  boss.boss = true;
+  boss.maxHealth = 60 + this.wave * 5; // ajuste conforme o dano do jogador
+  boss.health = boss.maxHealth;
+  boss.speed = 1.1;
+  boss.sprite.setScale(2.6).setTint(0xff6b6b);
+
+  this.updateEnemyHealthBar(boss);
+  this.enemies.push(boss);
+
+  this.bossEnemy = boss;
+  this.nextBossShotTime = this.time.now + 3000;
+  this.showStageBanner("O GUARDIÃO DA FENDA APARECEU!");
+}
+
+// A cada 4 s dispara uma rajada de 3 projéteis na direção do jogador.
+private updateBoss() {
+  const boss = this.bossEnemy;
+  if (!boss || !boss.alive) return;
+  if (this.time.now < this.nextBossShotTime) return;
+
+  this.nextBossShotTime = this.time.now + 4000;
+
+  for (let i = 0; i < 3; i++) {
+    this.time.delayedCall(i * 200, () => {
+      if (boss.alive && !this.gameOver) this.fireEnemyProjectile(boss);
+    });
+  }
+}
+
+private onBossDefeated() {
+  this.bossDefeated = true;
+  this.bossEnemy = undefined;
+  this.showStageBanner("CHEFE DERROTADO!");
+
+  this.time.delayedCall(1200, () => {
+    if (!this.gameOver) this.openPortal();
+  });
+}
+
+// ----- Fim de jogo (vitória ou derrota) -----
+
+private endRun(result: "victory" | "defeat") {
+  if (this.gameOver) return;
+  this.gameOver = true;
+
+  const bestWave = saveBestWave(this.wave);
+  const survivalTime = Math.floor(this.survivalMs / 1000);
+
+  saveMatch({
+    wave: this.wave,
+    level: this.level,
+    survivalTime,
+    enemiesDefeated: this.totalEnemiesDefeated,
+    date: new Date().toISOString(),
+  });
+
+  savePermanentStats({
+    wave: this.wave,
+    level: this.level,
+    survivalTime,
+    enemiesDefeated: this.totalEnemiesDefeated,
+  });
+
+  this.unlockAndNotify("first-match");
+
+  this.scene.start("EndScene", {
+    result,
+    wave: this.wave,
+    bestWave,
+    survivalTime,
+    stage: this.currentStage,
+  });
+}
 
   private createHUD() {
     const width = this.scale.width;
@@ -3333,38 +3757,8 @@ private createLevelUpEffect() {
     });
 
     if (this.playerHealth <= 0) {
-      // hurtPlayer() já retorna cedo quando gameOver é true,
-      // então esta transição acontece uma única vez.
-      this.gameOver = true;
-
-      const bestWave = saveBestWave(this.wave);
-
-      const survivalTime = Math.floor(
-        (Date.now() - this.matchStartTime) / 1000
-      );
-
-      saveMatch({
-        wave: this.wave,
-        level: this.level,
-        survivalTime,
-        enemiesDefeated: this.totalEnemiesDefeated,
-        date: new Date().toISOString(),
-      });
-
-      savePermanentStats({
-        wave: this.wave,
-        level: this.level,
-        survivalTime,
-        enemiesDefeated: this.totalEnemiesDefeated,
-      });
-
-      this.unlockAndNotify("first-match");
-
-      this.scene.start("EndScene", {
-        result: "defeat",
-        wave: this.wave,
-        bestWave,
-      });
+      // Matar o chefe já garante a vitória, mesmo morrendo para as sombras.
+      this.endRun(this.bossDefeated ? "victory" : "defeat");
     }
   }
 
@@ -3680,6 +4074,9 @@ private createAbilityParticles(
     if (this.upgradePending) {
       return;
     }
+
+    this.updateStageSystem(delta);
+    if (this.gameOver) return;
 
     this.updateRegeneration(delta);
     this.updateHUD();
