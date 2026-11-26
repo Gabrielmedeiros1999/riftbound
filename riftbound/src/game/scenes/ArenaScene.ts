@@ -7,7 +7,7 @@ import { getCharacterClass } from "../utils/characterClasses";
 import { CLASS_ABILITIES } from "../utils/abilities";
 
 
-type DamageSource = "melee" | "arrow" | "fire" | "ice" | "lightning" | "synergy";
+type DamageSource = "melee" | "arrow" | "fire" | "ice" | "lightning" | "aura" | "synergy";
 
 type EnemyStatus = {
   burnUntil: number;
@@ -232,11 +232,24 @@ export class ArenaScene extends Phaser.Scene {
   private nextLightningTime = 0;
   private synergies = new Set<string>();
 
+  private auraLevel = 0;
+  private nextAuraTick = 0;
+  private auraRing?: Phaser.GameObjects.Ellipse;
+  private firePatches: {
+    x: number;
+    y: number;
+    until: number;
+    nextTick: number;
+    shape: Phaser.GameObjects.Ellipse;
+  }[] = [];
+  private nextPatchTime = 0;
+
   // melhorias  pendentes
   private pendingLevelUps = 0;
   private upgradePending = false;
   private upgradeObjects: Phaser.GameObjects.GameObject[] = [];
   private readonly upgradeIcons: Record<string, { key: string; emoji: string }> = {
+    // Melhorias base
     "LAMINA APRIMORADA": { key: "icon-blade", emoji: "⚔️" },
     "PASSOS VELOZES": { key: "icon-speed", emoji: "👟" },
     "VITALIDADE": { key: "icon-vitality", emoji: "❤️" },
@@ -245,6 +258,26 @@ export class ArenaScene extends Phaser.Scene {
     "IMA DE GEMAS": { key: "icon-magnet", emoji: "🧲" },
     "ARCO ARCANO": { key: "icon-arrow", emoji: "🏹" },
     "BOLA DE FOGO": { key: "icon-fireball", emoji: "🔥" },
+
+    // Armas novas
+    "LANCA DE GELO": { key: "icon-frost", emoji: "❄️" },
+    "RAIO ENCADEADO": { key: "icon-lightning", emoji: "⚡" },
+    "AURA DE ESPINHOS": { key: "icon-aura", emoji: "🌀" },
+
+    // Sinergias entre armas
+    "CHOQUE TERMICO": { key: "icon-thermal-shock", emoji: "💥" },
+    "CONDUTOR": { key: "icon-conductor", emoji: "🔗" },
+    "TEMPESTADE IGNEA": { key: "icon-firestorm", emoji: "🌩️" },
+    "FLECHAS ELEMENTARES": { key: "icon-elemental-arrows", emoji: "✨" },
+    "AURA GELIDA": { key: "icon-frost-aura", emoji: "🧊" },
+    "AURA IGNEA": { key: "icon-fire-aura", emoji: "☄️" },
+    "BANQUETE": { key: "icon-feast", emoji: "🍖" },
+    "ESTILHACO EM CADEIA": { key: "icon-shatter-chain", emoji: "💎" },
+
+    // Sinergias de classe
+    "RASTRO ARDENTE": { key: "icon-ember-dash", emoji: "🌋" },
+    "EXPLOSAO GELIDA": { key: "icon-frost-nova", emoji: "🌨️" },
+    "ESCUDO ESPINHOSO": { key: "icon-thorn-shield", emoji: "🛡️" },
   };
 
     // Reroll / Pular / Banir: cargas por partida.
@@ -482,6 +515,11 @@ export class ArenaScene extends Phaser.Scene {
   this.nextFrostTime = 0;
   this.nextLightningTime = 0;
   this.synergies = new Set<string>();
+  this.auraLevel = 0;
+  this.nextAuraTick = 0;
+  this.auraRing = undefined;
+  this.firePatches = [];
+  this.nextPatchTime = 0;
 }
 
  preload(){
@@ -1205,9 +1243,11 @@ private getUpgradePool(): UpgradeOption[] {
   const fireName =
     this.fireballLevel === 0 ? "BOLA DE FOGO" : `BOLA DE FOGO (NV ${this.fireballLevel + 1})`;
   const frostName =
-  this.frostLevel === 0 ? "LANCA DE GELO" : `LANCA DE GELO (NV ${this.frostLevel + 1})`;
+     this.frostLevel === 0 ? "LANCA DE GELO" : `LANCA DE GELO (NV ${this.frostLevel + 1})`;
   const lightningName =
     this.lightningLevel === 0 ? "RAIO ENCADEADO" : `RAIO ENCADEADO (NV ${this.lightningLevel + 1})`;
+  const auraName =
+     this.auraLevel === 0 ? "AURA DE ESPINHOS" : `AURA DE ESPINHOS (NV ${this.auraLevel + 1})`;  
 
   return [
     {
@@ -1237,6 +1277,16 @@ private getUpgradePool(): UpgradeOption[] {
       description: `Regenera +1 de vida por segundo (atual: ${this.regenPerSecond})`,
       apply: () => {
         this.regenPerSecond += 1;
+      },
+    },
+    {
+      title: auraName,
+      description:
+        this.auraLevel === 0
+          ? "Aura que fere continuamente quem chega perto"
+          : "Aura maior, mais forte e mais rapida",
+      apply: () => {
+        this.auraLevel += 1;
       },
     },
     {
@@ -1381,7 +1431,10 @@ private getUpgradePool(): UpgradeOption[] {
 // ---------------------------------------------------------------------
 
 private getSynergyDefs() {
+  const cls = this.selectedClassId;
+
   return [
+    // --- Entre armas ---
     {
       id: "thermal-shock",
       title: "CHOQUE TERMICO",
@@ -1407,6 +1460,51 @@ private getSynergyDefs() {
       description: "As flechas herdam queimadura e/ou gelo das suas outras armas",
       requires: () =>
         this.arrowLevel > 0 && (this.fireballLevel > 0 || this.frostLevel > 0),
+    },
+    {
+      id: "frost-aura",
+      title: "AURA GELIDA",
+      description: "A aura retarda todos os inimigos que ela toca",
+      requires: () => this.auraLevel > 0 && this.frostLevel > 0,
+    },
+    {
+      id: "fire-aura",
+      title: "AURA IGNEA",
+      description: "A aura incendeia todos os inimigos que ela toca",
+      requires: () => this.auraLevel > 0 && this.fireballLevel > 0,
+    },
+    {
+      id: "feast",
+      title: "BANQUETE",
+      description: "Matar um inimigo em chamas cura 4 de vida",
+      requires: () => this.lifeStealPerHit > 0 && this.fireballLevel > 0,
+    },
+    {
+      id: "shatter-chain",
+      title: "ESTILHACO EM CADEIA",
+      description:
+        "Inimigo gelado que morre explode em gelo, ferindo e congelando os vizinhos",
+      requires: () => this.frostLevel >= 2,
+    },
+
+    // --- Por classe ---
+    {
+      id: "ember-dash",
+      title: "RASTRO ARDENTE",
+      description: "O dash deixa um rastro de fogo que incendeia quem pisar nele",
+      requires: () => cls === "assassin" && this.fireballLevel > 0,
+    },
+    {
+      id: "frost-nova",
+      title: "EXPLOSAO GELIDA",
+      description: "A explosao arcana tambem congela todos os inimigos atingidos",
+      requires: () => cls === "mage" && this.frostLevel > 0,
+    },
+    {
+      id: "thorn-shield",
+      title: "ESCUDO ESPINHOSO",
+      description: "Com o escudo ativo, a aura causa o triplo de dano",
+      requires: () => cls === "warrior" && this.auraLevel > 0,
     },
   ];
 }
@@ -1464,6 +1562,141 @@ private thermalShatter(origin: Enemy, baseDamage: number) {
 }
 
 // ---------------------------------------------------------------------
+// Aura de espinhos
+// ---------------------------------------------------------------------
+
+private updateAura() {
+  if (this.auraLevel <= 0) return;
+
+  const now = this.time.now;
+  const radius = 1.3 + (this.auraLevel - 1) * 0.25;
+
+  if (!this.auraRing) {
+    this.auraRing = this.add.ellipse(0, 0, 10, 10, 0xa78bfa, 0.12);
+  }
+
+  const color = this.synergies.has("fire-aura")
+    ? 0xfb923c
+    : this.synergies.has("frost-aura")
+      ? 0x7dd3fc
+      : 0xa78bfa;
+
+  this.auraRing
+    .setPosition(this.player.x, this.player.y - 2)
+    .setSize(
+      radius * this.tileWidth * Math.SQRT2,
+      radius * this.tileHeight * Math.SQRT2,
+    )
+    .setFillStyle(color, 0.1 + 0.04 * Math.sin(now / 200))
+    .setStrokeStyle(2, color, 0.7)
+    .setDepth(this.player.depth - 1);
+
+  if (now < this.nextAuraTick) return;
+  this.nextAuraTick = now + Math.max(350, 700 - (this.auraLevel - 1) * 60);
+
+  const thorn =
+    this.synergies.has("thorn-shield") && now < this.shieldActiveUntil;
+
+  const damage =
+    (Math.max(1, Math.ceil(this.playerDamage / 3)) + (this.auraLevel - 1)) *
+    (thorn ? 3 : 1);
+
+  for (const enemy of [...this.enemies]) {
+    if (!enemy.alive) continue;
+
+    const distance = Math.hypot(enemy.x - this.worldX, enemy.y - this.worldY);
+    if (distance > radius) continue;
+
+    this.hitEnemy(enemy, damage, "aura");
+  }
+}
+
+// ---------------------------------------------------------------------
+// Sinergias de classe e efeitos de morte
+// ---------------------------------------------------------------------
+
+private addFirePatch(x: number, y: number) {
+  const pos = this.projectPosition(x, y);
+  const shape = this.add
+    .ellipse(pos.x, pos.y, 46, 22, 0xf97316, 0.5)
+    .setDepth(pos.y - 1);
+
+  this.firePatches.push({
+    x,
+    y,
+    until: this.time.now + 3000,
+    nextTick: 0,
+    shape,
+  });
+}
+
+private updateClassSynergies() {
+  const now = this.time.now;
+
+  // Assassino: o dash deixa poças de fogo pelo caminho.
+  if (
+    this.synergies.has("ember-dash") &&
+    now < this.dashUntil &&
+    now >= this.nextPatchTime
+  ) {
+    this.nextPatchTime = now + 60;
+    this.addFirePatch(this.worldX, this.worldY);
+  }
+
+  for (let i = this.firePatches.length - 1; i >= 0; i--) {
+    const patch = this.firePatches[i];
+
+    if (now >= patch.until) {
+      patch.shape.destroy();
+      this.firePatches.splice(i, 1);
+      continue;
+    }
+
+    patch.shape.setAlpha(0.35 + 0.15 * Math.sin(now / 120));
+
+    if (now < patch.nextTick) continue;
+    patch.nextTick = now + 300;
+
+    for (const enemy of [...this.enemies]) {
+      if (!enemy.alive) continue;
+
+      if (Math.hypot(enemy.x - patch.x, enemy.y - patch.y) < 0.8) {
+        this.applyStatus(enemy, "burn", 2000);
+      }
+    }
+  }
+}
+
+// Chamado quando um inimigo morre (ele já saiu da lista de inimigos).
+private onEnemyKilledSynergies(enemy: Enemy) {
+  const status = enemy.status;
+  if (!status) return;
+
+  const now = this.time.now;
+
+  // Banquete: matar alguém em chamas cura o jogador.
+  if (this.synergies.has("feast") && now < status.burnUntil) {
+    this.healPlayer(4);
+  }
+
+  // Estilhaço em cadeia: inimigo gelado explode e congela os vizinhos.
+  if (this.synergies.has("shatter-chain") && now < status.chillUntil) {
+    this.createHitEffect(enemy.x, enemy.y, 0x7dd3fc);
+
+    const damage = Math.max(1, Math.ceil(this.playerDamage * 0.8));
+
+    for (const other of [...this.enemies]) {
+      if (!other.alive) continue;
+      if (Math.hypot(other.x - enemy.x, other.y - enemy.y) > 1.6) continue;
+
+      // Gela antes de ferir: se o vizinho morrer, ele também estilhaça.
+      this.applyStatus(other, "chill", 2000);
+      this.hitEnemy(other, damage, "synergy");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------
 // Status: queimadura e gelo
 // ---------------------------------------------------------------------
 
@@ -1475,6 +1708,9 @@ private applySourceStatus(enemy: Enemy, source: DamageSource) {
     this.applyStatus(enemy, "chill", 2500 + (this.frostLevel - 1) * 300);
   } else if (source === "lightning" && this.synergies.has("firestorm")) {
     this.applyStatus(enemy, "burn", 2500);
+  } else if (source === "aura") {
+    if (this.synergies.has("fire-aura")) this.applyStatus(enemy, "burn", 2000);
+    if (this.synergies.has("frost-aura")) this.applyStatus(enemy, "chill", 1500);
   }
 }
 
@@ -2252,6 +2488,7 @@ private drawLightning(targets: Enemy[]) {
   private handleEnemyDefeated(enemy: Enemy) {
     enemy.alive = false;
     this.enemies = this.enemies.filter((other) => other !== enemy);
+    this.onEnemyKilledSynergies(enemy);
 
     // Bomba: explode ao morrer (por qualquer causa), ferindo quem estiver perto.
     if (enemy.type === "bomber") {
@@ -3048,6 +3285,10 @@ private healPlayer(amount: number) {
           enemy,
           this.playerDamage * this.mageExplosionDamageMultiplier,
         );
+
+        if (this.synergies.has("frost-nova")) {
+          this.applyStatus(enemy, "chill", 3000);
+        }
       }
     }
   }
@@ -4622,6 +4863,8 @@ private createAbilityParticles(
       return;
     }
 
+    this.updateAura();
+    this.updateClassSynergies();
     this.updateStatuses();
     this.updateAutoWeapons();
     this.updateProjectiles(delta);
