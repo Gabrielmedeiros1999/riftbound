@@ -6,6 +6,18 @@ import { unlockAchievement } from "../utils/achievements";
 import { getCharacterClass } from "../utils/characterClasses";
 import { CLASS_ABILITIES } from "../utils/abilities";
 
+
+type DamageSource = "melee" | "arrow" | "fire" | "ice" | "lightning" | "synergy";
+
+type EnemyStatus = {
+  burnUntil: number;
+  chillUntil: number;
+  nextBurnTick: number;
+  burnDamage: number;
+  burning: boolean;
+  chilled: boolean;
+};
+
 type UpgradeOption = {
   title: string;
   description: string;
@@ -29,6 +41,8 @@ type Projectile = {
   speed: number;
   damage: number;
   expiresAt: number;
+  source?: DamageSource;
+  statuses?: ("burn" | "chill")[];
 };
 type EnemyType = "normal" | "runner" | "brute" | "spitter" | "bomber";
 
@@ -53,6 +67,8 @@ type Enemy = {
   healthBar: Phaser.GameObjects.Graphics;
   shadow?: boolean; // inimigo sombra (aparece depois do portal)
   boss?: boolean;   // chefe do estágio final
+  status?: EnemyStatus;
+  baseSpeed?: number;
 };
 
 // Projétil disparado por um inimigo (cuspidor).
@@ -208,6 +224,13 @@ export class ArenaScene extends Phaser.Scene {
     if (type === "bomber") return "enemy-bomber";
     return "enemy-zombie";
   }
+
+  // sinergias
+  private frostLevel = 0;
+  private lightningLevel = 0;
+  private nextFrostTime = 0;
+  private nextLightningTime = 0;
+  private synergies = new Set<string>();
 
   // melhorias  pendentes
   private pendingLevelUps = 0;
@@ -452,6 +475,13 @@ export class ArenaScene extends Phaser.Scene {
   this.bossEnemy = undefined;
   this.portal = undefined;
   this.arenaTiles = [];
+
+  // sinergias
+  this.frostLevel = 0;
+  this.lightningLevel = 0;
+  this.nextFrostTime = 0;
+  this.nextLightningTime = 0;
+  this.synergies = new Set<string>();
 }
 
  preload(){
@@ -1174,6 +1204,10 @@ private getUpgradePool(): UpgradeOption[] {
     this.arrowLevel === 0 ? "ARCO ARCANO" : `ARCO ARCANO (NV ${this.arrowLevel + 1})`;
   const fireName =
     this.fireballLevel === 0 ? "BOLA DE FOGO" : `BOLA DE FOGO (NV ${this.fireballLevel + 1})`;
+  const frostName =
+  this.frostLevel === 0 ? "LANCA DE GELO" : `LANCA DE GELO (NV ${this.frostLevel + 1})`;
+  const lightningName =
+    this.lightningLevel === 0 ? "RAIO ENCADEADO" : `RAIO ENCADEADO (NV ${this.lightningLevel + 1})`;
 
   return [
     {
@@ -1247,6 +1281,27 @@ private getUpgradePool(): UpgradeOption[] {
         this.fireballLevel += 1;
       },
     },
+    {
+      title: frostName,
+      description:
+        this.frostLevel === 0
+          ? "Dispara lancas que retardam os inimigos"
+          : "Lancas mais fortes, rapidas e gelidas",
+      apply: () => {
+        this.frostLevel += 1;
+      },
+    },
+    {
+      title: lightningName,
+      description:
+        this.lightningLevel === 0
+          ? "Raio que salta entre inimigos proximos"
+          : "Mais saltos, mais dano e recarga menor",
+      apply: () => {
+        this.lightningLevel += 1;
+      },
+    },
+    ...this.getSynergyUpgrades(),
   ];
 }
 
@@ -1319,6 +1374,270 @@ private getUpgradePool(): UpgradeOption[] {
 
     this.rollUpgradeOptions(false);
   }
+
+ 
+  // ---------------------------------------------------------------------
+// Sinergias
+// ---------------------------------------------------------------------
+
+private getSynergyDefs() {
+  return [
+    {
+      id: "thermal-shock",
+      title: "CHOQUE TERMICO",
+      description:
+        "Bola de fogo em inimigo gelado estilhaca: +60% de dano e explosao que congela vizinhos",
+      requires: () => this.fireballLevel > 0 && this.frostLevel > 0,
+    },
+    {
+      id: "conductor",
+      title: "CONDUTOR",
+      description: "Raio salta +2 vezes e causa +50% de dano em inimigos gelados",
+      requires: () => this.frostLevel > 0 && this.lightningLevel > 0,
+    },
+    {
+      id: "firestorm",
+      title: "TEMPESTADE IGNEA",
+      description: "Todo inimigo atingido pelo raio e incendiado",
+      requires: () => this.fireballLevel > 0 && this.lightningLevel > 0,
+    },
+    {
+      id: "elemental-arrows",
+      title: "FLECHAS ELEMENTARES",
+      description: "As flechas herdam queimadura e/ou gelo das suas outras armas",
+      requires: () =>
+        this.arrowLevel > 0 && (this.fireballLevel > 0 || this.frostLevel > 0),
+    },
+  ];
+}
+
+private getSynergyUpgrades(): UpgradeOption[] {
+  return this.getSynergyDefs()
+    .filter((def) => !this.synergies.has(def.id) && def.requires())
+    .map((def) => ({
+      title: def.title,
+      description: def.description,
+      apply: () => {
+        this.synergies.add(def.id);
+        this.showStageBanner(`SINERGIA: ${def.title}`);
+      },
+    }));
+}
+
+private isSynergyOption(option: UpgradeOption): boolean {
+  return this.getSynergyDefs().some((def) => def.title === option.title);
+}
+
+// Chamado antes do dano: pode aumentar o dano e disparar efeitos extras.
+private resolveSynergies(enemy: Enemy, amount: number, source: DamageSource): number {
+  const now = this.time.now;
+  const status = enemy.status;
+  const chilled = !!status && now < status.chillUntil;
+
+  // Fogo em alvo gelado: choque termico.
+  if (source === "fire" && chilled && this.synergies.has("thermal-shock")) {
+    status!.chillUntil = 0;
+    status!.chilled = false;
+    this.refreshStatusTint(enemy);
+    this.thermalShatter(enemy, amount);
+    return Math.ceil(amount * 1.6);
+  }
+
+  // Raio em alvo gelado: dano extra.
+  if (source === "lightning" && chilled && this.synergies.has("conductor")) {
+    return Math.ceil(amount * 1.5);
+  }
+
+  return amount;
+}
+
+private thermalShatter(origin: Enemy, baseDamage: number) {
+  this.createHitEffect(origin.x, origin.y, 0x7dd3fc);
+
+  for (const other of [...this.enemies]) {
+    if (other === origin || !other.alive) continue;
+    if (Math.hypot(other.x - origin.x, other.y - origin.y) > 1.4) continue;
+
+    this.hitEnemy(other, Math.ceil(baseDamage * 0.5), "synergy");
+    this.applyStatus(other, "chill", 1500);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Status: queimadura e gelo
+// ---------------------------------------------------------------------
+
+// Efeito que cada fonte de dano aplica por conta propria.
+private applySourceStatus(enemy: Enemy, source: DamageSource) {
+  if (source === "fire") {
+    this.applyStatus(enemy, "burn", 3000);
+  } else if (source === "ice") {
+    this.applyStatus(enemy, "chill", 2500 + (this.frostLevel - 1) * 300);
+  } else if (source === "lightning" && this.synergies.has("firestorm")) {
+    this.applyStatus(enemy, "burn", 2500);
+  }
+}
+
+private applyStatus(enemy: Enemy, kind: "burn" | "chill", durationMs: number) {
+  if (!enemy.alive) return;
+
+  const now = this.time.now;
+
+  if (!enemy.status) {
+    enemy.status = {
+      burnUntil: 0,
+      chillUntil: 0,
+      nextBurnTick: 0,
+      burnDamage: 1,
+      burning: false,
+      chilled: false,
+    };
+  }
+
+  if (enemy.baseSpeed === undefined) enemy.baseSpeed = enemy.speed;
+
+  const status = enemy.status;
+
+  if (kind === "burn") {
+    if (status.burnUntil <= now) status.nextBurnTick = now + 500;
+    status.burnUntil = Math.max(status.burnUntil, now + durationMs);
+    status.burnDamage = Math.max(1, Math.ceil(this.playerDamage / 2));
+  } else {
+    status.chillUntil = Math.max(status.chillUntil, now + durationMs);
+  }
+
+  status.burning = now < status.burnUntil;
+  status.chilled = now < status.chillUntil;
+  this.refreshStatusTint(enemy);
+}
+
+private updateStatuses() {
+  const now = this.time.now;
+
+  for (const enemy of [...this.enemies]) {
+    const status = enemy.status;
+    if (!enemy.alive || !status) continue;
+
+    const burning = now < status.burnUntil;
+    const chilled = now < status.chillUntil;
+
+    if (burning && now >= status.nextBurnTick) {
+      status.nextBurnTick = now + 500;
+      this.statusDamage(enemy, status.burnDamage);
+      if (!enemy.alive) continue;
+    }
+
+    // Gelo retarda; o chefe resiste mais.
+    const slow = chilled ? (enemy.boss ? 0.8 : 0.55) : 1;
+    enemy.speed = (enemy.baseSpeed ?? enemy.speed) * slow;
+
+    if (burning !== status.burning || chilled !== status.chilled) {
+      status.burning = burning;
+      status.chilled = chilled;
+      this.refreshStatusTint(enemy);
+    }
+  }
+}
+
+// Dano continuo: sem piscar nem som, para nao poluir a tela.
+private statusDamage(enemy: Enemy, amount: number) {
+  enemy.health -= amount;
+  this.showDamageNumber(enemy.container.x, enemy.container.y, amount);
+  this.updateEnemyHealthBar(enemy);
+
+  if (enemy.health <= 0) this.handleEnemyDefeated(enemy);
+}
+
+private refreshStatusTint(enemy: Enemy) {
+  const status = enemy.status;
+
+  if (status?.burning) enemy.sprite.setTint(0xfb923c);
+  else if (status?.chilled) enemy.sprite.setTint(0x7dd3fc);
+  else if (enemy.boss) enemy.sprite.setTint(0xff6b6b);
+  else if (enemy.shadow) enemy.sprite.setTint(0x2e1065);
+  else enemy.sprite.clearTint();
+}
+
+// ---------------------------------------------------------------------
+// Raio encadeado
+// ---------------------------------------------------------------------
+
+private castLightning() {
+  const first = this.getNearestEnemy();
+  if (!first) return;
+
+  const maxTargets =
+    2 + this.lightningLevel + (this.synergies.has("conductor") ? 2 : 0);
+  const damage =
+    Math.max(1, Math.ceil(this.playerDamage * 0.8)) + (this.lightningLevel - 1);
+
+  const path: Enemy[] = [];
+  let current: Enemy | undefined = first;
+
+  while (current && path.length < maxTargets) {
+    path.push(current);
+    const from: Enemy = current;
+
+    current = this.enemies
+      .filter(
+        (e) =>
+          e.alive &&
+          !path.includes(e) &&
+          Math.hypot(e.x - from.x, e.y - from.y) < 2.8,
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - from.x, a.y - from.y) -
+          Math.hypot(b.x - from.x, b.y - from.y),
+      )[0];
+  }
+
+  // Desenha antes do dano, enquanto os alvos ainda existem.
+  this.drawLightning(path);
+
+  for (const enemy of path) {
+    this.hitEnemy(enemy, damage, "lightning");
+  }
+}
+
+private drawLightning(targets: Enemy[]) {
+  const g = this.add.graphics().setDepth(20000);
+
+  let px = this.player.x;
+  let py = this.player.y - 24;
+
+  for (const enemy of targets) {
+    const tx = enemy.container.x;
+    const ty = enemy.container.y - 20;
+    const segments = 5;
+
+    let lx = px;
+    let ly = py;
+
+    for (let i = 1; i <= segments; i++) {
+      const t = i / segments;
+      const jitter = i === segments ? 0 : Phaser.Math.Between(-8, 8);
+      const nx = Phaser.Math.Linear(px, tx, t) + jitter;
+      const ny = Phaser.Math.Linear(py, ty, t) + jitter;
+
+      g.lineStyle(5, 0x8b5cf6, 0.5).lineBetween(lx, ly, nx, ny);
+      g.lineStyle(2, 0xf5f3ff, 1).lineBetween(lx, ly, nx, ny);
+
+      lx = nx;
+      ly = ny;
+    }
+
+    px = tx;
+    py = ty;
+  }
+
+  this.tweens.add({
+    targets: g,
+    alpha: 0,
+    duration: 220,
+    onComplete: () => g.destroy(),
+  });
+}
 
   private createUpgradeButton(
     x: number,
@@ -1420,6 +1739,9 @@ private getUpgradePool(): UpgradeOption[] {
       this.getAvailableUpgrades(),
     );
 
+    const synergyIndex = pool.findIndex((o) => this.isSynergyOption(o));
+    if (synergyIndex > 0) pool.unshift(...pool.splice(synergyIndex, 1));
+
     if (avoidCurrent) {
       pool = [
         ...pool.filter((option) => !currentIds.has(this.getUpgradeId(option))),
@@ -1459,6 +1781,9 @@ private getUpgradePool(): UpgradeOption[] {
         .setScrollFactor(0)
         .setDepth(20001)
         .setInteractive({ useHandCursor: true });
+
+      // destaque dourado nas cartas de sinergia
+      if (this.isSynergyOption(option)) card.setStrokeStyle(2, 0xfbbf24);  
 
       // Moldura do ícone + ícone.
       const iconX = left + 38;
@@ -2556,35 +2881,47 @@ private getUpgradePool(): UpgradeOption[] {
   }
 
   // Aplica dano a um inimigo (golpe, flecha, bola de fogo, dash ou explosão).
-  private hitEnemy(enemy: Enemy, amount: number) {
-    if (!enemy.alive) return;
+private hitEnemy(
+  enemy: Enemy,
+  amount: number,
+  source: DamageSource = "melee",
+) {
+  if (!enemy.alive) return;
 
-    enemy.health -= amount;
-    this.playHitSfx(0.6);
-
-    this.showDamageNumber(enemy.container.x, enemy.container.y, amount);
-
-    this.createHitEffect(
-      enemy.x,
-      enemy.y,
-      this.getEnemyColor(enemy.type),
-    );
-
-    this.updateEnemyHealthBar(enemy);
-
-    // Efeito visual de dano.
-    enemy.container.setAlpha(0.35);
-
-    this.time.delayedCall(100, () => {
-      if (enemy.alive && enemy.container.active) {
-        enemy.container.setAlpha(1);
-      }
-    });
-
-    if (enemy.health <= 0) {
-      this.handleEnemyDefeated(enemy);
-    }
+  if (source !== "synergy") {
+    amount = this.resolveSynergies(enemy, amount, source);
   }
+
+  enemy.health -= amount;
+  this.playHitSfx(0.6);
+
+  this.showDamageNumber(enemy.container.x, enemy.container.y, amount);
+
+  this.createHitEffect(
+    enemy.x,
+    enemy.y,
+    this.getEnemyColor(enemy.type),
+  );
+
+  this.updateEnemyHealthBar(enemy);
+
+  // Efeito visual de dano.
+  enemy.container.setAlpha(0.35);
+
+  this.time.delayedCall(100, () => {
+    if (enemy.alive && enemy.container.active) {
+      enemy.container.setAlpha(1);
+    }
+  });
+
+  if (enemy.health > 0 && source !== "synergy") {
+    this.applySourceStatus(enemy, source);
+  }
+
+  if (enemy.health <= 0) {
+    this.handleEnemyDefeated(enemy);
+  }
+}
 
 private healPlayer(amount: number) {
   if (amount <= 0 || this.gameOver) return;
@@ -3796,6 +4133,22 @@ private updateAutoWeapons() {
 
     this.fireProjectile("fireball", damage);
   }
+
+    if (this.frostLevel > 0 && now >= this.nextFrostTime) {
+    this.nextFrostTime = now + Math.max(700, 1800 - (this.frostLevel - 1) * 200);
+
+    const damage =
+      Math.max(1, Math.ceil(this.playerDamage / 2)) + (this.frostLevel - 1);
+
+    this.fireProjectile("frost", damage);
+  }
+
+  if (this.lightningLevel > 0 && now >= this.nextLightningTime) {
+    this.nextLightningTime =
+      now + Math.max(1200, 2600 - (this.lightningLevel - 1) * 300);
+
+    this.castLightning();
+  }
 }
 
 // Inimigo vivo mais próximo do jogador (alvo das armas automáticas).
@@ -3822,7 +4175,7 @@ private updateAutoWeapons() {
 
     // Usa o sprite do PixelLab se ele foi carregado; senão, o desenho provisório.
   private createProjectileShape(
-    kind: "arrow" | "fireball",
+    kind: "arrow" | "fireball" | "frost",
   ):
     | Phaser.GameObjects.Shape
     | Phaser.GameObjects.Sprite
@@ -3837,6 +4190,10 @@ private updateAutoWeapons() {
       return this.add.circle(0, 0, 8, 0xf97316).setStrokeStyle(3, 0xef4444);
     }
 
+    if (kind === "frost") {
+      return this.add.circle(0, 0, 6, 0x7dd3fc).setStrokeStyle(2, 0xe0f2fe);
+    }
+
     if (this.textures.exists("proj-arrow")) {
       // A flecha é escura e pequena: um brilho violeta atrás dela a mantém
       // visível sobre o chão da arena.
@@ -3849,20 +4206,19 @@ private updateAutoWeapons() {
     return this.add.rectangle(0, 0, 16, 3, 0xfde68a);
   }
 
-  private fireProjectile(kind: "arrow" | "fireball", damage: number) {
-    const target = this.getNearestEnemy();
+ private fireProjectile(kind: "arrow" | "fireball" | "frost", damage: number) {
+  const target = this.getNearestEnemy();
 
-    if (!target) return;
+  if (!target) return;
 
-    const dx = target.x - this.worldX;
-    const dy = target.y - this.worldY;
+  const dx = target.x - this.worldX;
+  const dy = target.y - this.worldY;
   const distance = Math.hypot(dx, dy);
 
   if (distance === 0) return;
 
   const dirX = dx / distance;
   const dirY = dy / distance;
-  const isFireball = kind === "fireball";
 
   const shape = this.createProjectileShape(kind);
 
@@ -3874,15 +4230,27 @@ private updateAutoWeapons() {
     ),
   );
 
+  const source: DamageSource =
+    kind === "fireball" ? "fire" : kind === "frost" ? "ice" : "arrow";
+
+  const statuses: ("burn" | "chill")[] = [];
+
+  if (kind === "arrow" && this.synergies.has("elemental-arrows")) {
+    if (this.fireballLevel > 0) statuses.push("burn");
+    if (this.frostLevel > 0) statuses.push("chill");
+  }
+
   const projectile: Projectile = {
     shape,
     x: this.worldX,
     y: this.worldY,
     dirX,
     dirY,
-    speed: isFireball ? 5 : 9,
+    speed: kind === "fireball" ? 5 : kind === "frost" ? 7 : 9,
     damage,
     expiresAt: this.time.now + 2000,
+    source,
+    statuses,
   };
 
   this.projectiles.push(projectile);
@@ -3931,7 +4299,12 @@ private updateProjectiles(delta: number) {
       );
 
       if (target) {
-        this.hitEnemy(target, projectile.damage);
+        this.hitEnemy(target, projectile.damage, projectile.source ?? "arrow");
+
+        for (const status of projectile.statuses ?? []) {
+          this.applyStatus(target, status, status === "burn" ? 3000 : 2500);
+        }
+
         remove = true;
       }
     }
@@ -4249,6 +4622,7 @@ private createAbilityParticles(
       return;
     }
 
+    this.updateStatuses();
     this.updateAutoWeapons();
     this.updateProjectiles(delta);
 
