@@ -1,3 +1,4 @@
+
 import { useEffect, useRef } from "react";
 import Phaser from "phaser";
 import { ArenaScene } from "../game/scenes/ArenaScene";
@@ -24,16 +25,46 @@ export function GameCanvas() {
       backgroundColor: "#0f172a",
       pixelArt: true,
       antialias: false,
-      scene: [MenuScene, ArenaScene, EndScene, PauseScene, StatisticsScene, AchievementsScene, SelectionScene],
+      scene: [
+        MenuScene,
+        ArenaScene,
+        EndScene,
+        PauseScene,
+        StatisticsScene,
+        AchievementsScene,
+        SelectionScene,
+      ],
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
-        // A própria div entra em tela cheia, então o FIT passa a medir a tela toda.
         fullscreenTarget: container,
       },
     });
 
+    // Mobile: no primeiro toque entra em tela cheia e trava na horizontal.
+    // No iOS Safari pode não funcionar; o try/catch ignora a falta de suporte.
+    const isTouch = window.matchMedia("(pointer: coarse)").matches;
+
+    const enterFullscreen = async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await container.requestFullscreen();
+        }
+
+        await (screen.orientation as any).lock?.("landscape");
+      } catch {
+        // Sem suporte: segue o jogo normalmente.
+      }
+    };
+
+    if (isTouch) {
+      container.addEventListener("pointerdown", enterFullscreen, {
+        once: true,
+      });
+    }
+
     return () => {
+      container.removeEventListener("pointerdown", enterFullscreen);
       game.destroy(true);
     };
   }, []);

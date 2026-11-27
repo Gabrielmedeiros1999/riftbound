@@ -5,7 +5,7 @@ import { savePermanentStats } from "../utils/permanentStats";
 import { unlockAchievement } from "../utils/achievements";
 import { getCharacterClass } from "../utils/characterClasses";
 import { CLASS_ABILITIES } from "../utils/abilities";
-
+import { MobileControls, isMobileDevice } from "../utils/mobileControls";
 
 type DamageSource = "melee" | "arrow" | "fire" | "ice" | "lightning" | "aura" | "synergy";
 
@@ -106,6 +106,8 @@ export class ArenaScene extends Phaser.Scene {
     attack: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
   };
+
+  private mobileControls?: MobileControls;
 
   private escKey!: Phaser.Input.Keyboard.Key;
 
@@ -741,6 +743,23 @@ export class ArenaScene extends Phaser.Scene {
         this.scene.launch("PauseScene");
       }
     });
+
+    if (isMobileDevice(this)) {
+      this.mobileControls = new MobileControls(this, {
+        abilityIcon: abilityIcons[this.selectedClassId] ?? "?",
+        onPause: () => {
+          if (this.scene.isActive("ArenaScene")) {
+            this.scene.pause("ArenaScene");
+            this.scene.launch("PauseScene");
+          }
+        },
+      });
+
+      // O botão de habilidade do mobile já mostra a recarga.
+      this.abilityHudText?.setVisible(false);
+      this.abilityHudIcon?.setVisible(false);
+      this.abilityCooldownBar?.setVisible(false);
+    }
   }
 
     private activateAssassinDash(): void {
@@ -920,6 +939,7 @@ private createPixelLabAnimations(
     this.abilityCooldownBar.fillRoundedRect(
       barX, barY, barWidth * progress, barHeight, 3
     );
+    this.mobileControls?.setAbilityCooldown(progress, remainingSeconds);
   }
 
  // Toca o som de acerto no máximo uma vez a cada hitSfxCooldown ms.
@@ -4692,6 +4712,9 @@ private createAbilityParticles(
       return;
     }
 
+    // Esconde os controles na tela de melhorias, senão os toques atravessam o overlay.
+    this.mobileControls?.setEnabled(!this.upgradePending);
+
     // Hit-stop: durante alguns milissegundos a simulação fica parada.
     if (this.time.now < this.hitStopUntil) {
       return;
@@ -4718,6 +4741,15 @@ private createAbilityParticles(
     if (this.keys.down.isDown) dy += 1;
     if (this.keys.left.isDown) dx -= 1;
     if (this.keys.right.isDown) dx += 1;
+
+    // Joystick virtual (mobile)
+    let analog = false;
+    const stick = this.mobileControls?.getWorldMove(this.tileWidth, this.tileHeight);
+    if (stick) {
+      dx = stick.x;
+      dy = stick.y;
+      analog = true;
+    }
    
     if (dx !== 0 || dy !== 0) {
       if (Math.abs(dx) > Math.abs(dy)) {
@@ -4731,14 +4763,14 @@ private createAbilityParticles(
     }
 
 
-    if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
+    if (Phaser.Input.Keyboard.JustDown(this.abilityKey) || this.mobileControls?.consumeAbility()) {
       this.activateClassAbility();
     }
 
 
     // Inicia a esquiva quando Espaço é pressionado.
     if (
-      Phaser.Input.Keyboard.JustDown(this.keys.dodge) &&
+      (Phaser.Input.Keyboard.JustDown(this.keys.dodge) || this.mobileControls?.consumeDodge()) &&
       this.time.now >= this.nextDodgeTime
     ) {
       this.playSfx("dodge", 0.4);
@@ -4789,16 +4821,20 @@ private createAbilityParticles(
         this.time.now + this.dodgeCooldown;
     }
 
+   
+
     // Durante a esquiva, mantém a direção escolhida,
     // independentemente das teclas de movimento.
     if (this.time.now < this.dodgeUntil) {
       dx = this.dodgeDirX;
       dy = this.dodgeDirY;
+      analog = false;
     }
     
     if (this.time.now < this.dashUntil) {
       dx = this.dashDirX;
       dy = this.dashDirY;
+      analog = false;
     }
 
     // Atualiza a direção do personagem quando ele se move.
@@ -4808,7 +4844,7 @@ private createAbilityParticles(
     }
 
     // Normaliza a diagonal para manter a mesma velocidade.
-    if (dx !== 0 && dy !== 0) {
+    if (!analog && dx !== 0 && dy !== 0) {
       dx *= Math.SQRT1_2;
       dy *= Math.SQRT1_2;
     }
@@ -4888,9 +4924,9 @@ private createAbilityParticles(
       this.time.now < this.invulnerableUntil ? 0.45 : 1
     );
 
-    // Executa um ataque somente no momento em que J é pressionado.
-        if (
-      Phaser.Input.Keyboard.JustDown(this.keys.attack) &&
+    // Ataque: J no teclado, ou botão de ataque no mobile (segurar repete).
+    if (
+      (Phaser.Input.Keyboard.JustDown(this.keys.attack) || this.mobileControls?.attackHeld) &&
       this.time.now >= this.dashUntil
     ) {
       this.performAttack();
