@@ -594,6 +594,20 @@ export class ArenaScene extends Phaser.Scene {
       "magnet",
       "arrow",
       "fireball",
+      "ember-dash",
+      "frost-nova",
+      "thorn-shield",
+      "firestorm",
+      "conductor",
+      "elemental-arrows",
+      "feast",
+      "fire-aura",
+      "frost-aura",
+      "shatter-chain",
+      "thermal-shock",
+      "lightning",
+      "frost",
+      "aura"
     ].forEach((name) => {
       this.load.image(`icon-${name}`, `assets/icons/upgrades/${name}.png`);
     });
