@@ -49,6 +49,13 @@ export class MenuScene extends Phaser.Scene {
   private parallaxTarget = { x: 0, y: 0 };
   private parallax = { x: 0, y: 0 };
 
+  private skipIntro = false;
+
+  // Durante a rotação do celular, as animações de entrada terminam na hora.
+  private d(ms: number) {
+    return this.skipIntro ? 1 : ms;
+  }
+
   preload() {
     this.load.audio("menu-music", "assets/audio/menu.wav");
   }
@@ -66,24 +73,32 @@ export class MenuScene extends Phaser.Scene {
     this.parallaxTarget = { x: 0, y: 0 };
     this.parallax = { x: 0, y: 0 };
 
+    // A rotação do celular reinicia a cena só para refazer o layout:
+    // nesse caso pula a abertura (letras, botões, fade e música).
+    this.skipIntro = this.registry.get("menuRelayout") === true;
+    this.registry.remove("menuRelayout");
+
     this.cameras.main.setBackgroundColor("#0b0812");
-    this.cameras.main.fadeIn(350, 0, 0, 0);
+    if (!this.skipIntro) this.cameras.main.fadeIn(350, 0, 0, 0);
 
     const settings = loadSettings();
 
     this.registry.set("sfxVolume", settings.sfxVolume);
     this.registry.set("musicVolume", settings.musicVolume);
 
-    // Música ambiente do menu principal.
-    this.backgroundMusic = this.sound.add("menu-music", {
-      loop: true,
-      volume: settings.musicVolume,
-    });
+    // Na rotação a música continua tocando, sem reiniciar.
+    if (!(this.skipIntro && this.backgroundMusic?.isPlaying)) {
+      this.backgroundMusic = this.sound.add("menu-music", {
+        loop: true,
+        volume: settings.musicVolume,
+      });
 
-    this.backgroundMusic.play();
+      this.backgroundMusic.play();
+    }
 
     // Para a música quando o jogador sair do menu.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.registry.get("menuRelayout") === true) return; // só rotação
       this.backgroundMusic?.stop();
       this.backgroundMusic?.destroy();
       this.backgroundMusic = undefined;
@@ -401,8 +416,8 @@ export class MenuScene extends Phaser.Scene {
         alpha: 1,
         scale: 1,
         angle: 0,
-        duration: 520,
-        delay: 250 + index * 80,
+        duration: this.d(520),
+        delay: this.d(250 + index * 80),
         ease: "Bounce.easeOut",
         onComplete: () => {
           // Depois de pousar, a letra flutua suavemente.
@@ -436,9 +451,13 @@ export class MenuScene extends Phaser.Scene {
   }
 
   // Chamado quando a última letra do título pousa.
-  private onTitleLanded(titleY: number) {
-    const { width } = this.scale;
+ private onTitleLanded(titleY: number) {
+  const { width } = this.scale;
+  const fullText = "SOBREVIVA ÀS FENDAS";
 
+  if (this.skipIntro) {
+    this.subtitle.setText(fullText);
+  } else {
     // Pequeno tremor + onda de energia saindo do título.
     this.cameras.main.shake(140, 0.004);
 
@@ -457,25 +476,23 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // Subtítulo digitado.
-    const fullText = "SOBREVIVA ÀS FENDAS";
-
     this.time.addEvent({
       delay: 50,
       repeat: fullText.length - 1,
       callback: () => {
         const next = Math.min(this.subtitle.text.length + 1, fullText.length);
-
         this.subtitle.setText(fullText.slice(0, next));
       },
     });
-
-    // Brilho que varre as letras de tempos em tempos.
-    this.time.addEvent({
-      delay: 4200,
-      loop: true,
-      callback: () => this.shimmerTitle(),
-    });
   }
+
+  // Brilho que varre as letras de tempos em tempos.
+  this.time.addEvent({
+    delay: 4200,
+    loop: true,
+    callback: () => this.shimmerTitle(),
+  });
+}
 
   private shimmerTitle() {
     this.titleLetters.forEach((letter, index) => {
@@ -527,6 +544,18 @@ export class MenuScene extends Phaser.Scene {
         scene: "AchievementsScene",
       },
     ];
+
+      // Telas baixas (celular na horizontal): posições em pixels, com folga fixa
+      // entre os botões, em vez de porcentagem da altura.
+      if (height < 560) {
+        const gap = 22;
+        let y = height * 0.41 + definitions[0].h / 2; // topo do primeiro botão
+
+        definitions.forEach((definition, i) => {
+          definition.y = y;
+          y += definition.h / 2 + gap + (definitions[i + 1]?.h ?? 0) / 2;
+        });
+      }
 
     definitions.forEach((definition, index) => {
       const glow = this.add.rectangle(
@@ -603,8 +632,8 @@ export class MenuScene extends Phaser.Scene {
         targets: root,
         x: width / 2,
         alpha: 1,
-        duration: 520,
-        delay: 1100 + index * 140,
+        duration: this.d(520),
+        delay: this.d(1100 + index * 140),
         ease: "Back.easeOut",
         onComplete: () => {
           // Só libera clique/teclado quando o último botão terminou de entrar.
@@ -785,15 +814,15 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({
       targets: instructions,
       alpha: 1,
-      duration: 600,
-      delay: 1700,
+      duration: this.d(600), 
+      delay: this.d(1700)
     });
 
     this.tweens.add({
       targets: footer,
       alpha: 1,
-      duration: 600,
-      delay: 1900,
+      duration: this.d(600), 
+      delay: this.d(1900),
       onComplete: () => {
         // O rodapé "respira" bem de leve.
         this.tweens.add({

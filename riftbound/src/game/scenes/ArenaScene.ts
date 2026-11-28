@@ -414,6 +414,10 @@ export class ArenaScene extends Phaser.Scene {
   private abilityCooldownBar?: Phaser.GameObjects.Graphics;
   private gameOver = false;
 
+  private worldOriginX = 0;
+  private hudPanel?: Phaser.GameObjects.Graphics;
+  private lastLayoutW = 0;
+  private lastLayoutH = 0;
   
   private readonly contactDamage = 10;
   private readonly damageCooldown = 800;
@@ -617,6 +621,7 @@ export class ArenaScene extends Phaser.Scene {
 
 
   create() {
+    this.worldOriginX = this.scale.width / 2;
     this.textures.get("terrain").setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.selectedClassId =
     this.registry.get("selectedClassId") ?? "warrior";
@@ -744,23 +749,57 @@ export class ArenaScene extends Phaser.Scene {
       }
     });
 
-    if (isMobileDevice(this)) {
-      this.mobileControls = new MobileControls(this, {
-        abilityIcon: abilityIcons[this.selectedClassId] ?? "?",
-        onPause: () => {
-          if (this.scene.isActive("ArenaScene")) {
-            this.scene.pause("ArenaScene");
-            this.scene.launch("PauseScene");
-          }
-        },
-      });
-
-      // O botão de habilidade do mobile já mostra a recarga.
+      if (isMobileDevice(this)) {
+      this.createMobileControls();
       this.abilityHudText?.setVisible(false);
       this.abilityHudIcon?.setVisible(false);
       this.abilityCooldownBar?.setVisible(false);
     }
+
+    this.lastLayoutW = this.scale.width;
+    this.lastLayoutH = this.scale.height;
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize);
+    });
   }
+
+  private handleResize = () => {
+  const width = this.scale.width;
+  const height = this.scale.height;
+  if (width === this.lastLayoutW && height === this.lastLayoutH) return;
+  this.lastLayoutW = width;
+  this.lastLayoutH = height;
+
+  this.cameras.main.setSize(width, height);
+  this.drawHudPanel();
+
+  const right = width - 28;
+  this.comboLabel?.setX(right);
+  this.comboText?.setX(right);
+  this.comboBestText?.setX(right);
+  this.stageText?.setX(width / 2);
+  this.abilityHudText?.setPosition(width - 16, height - 30);
+
+  if (this.mobileControls) {
+    this.mobileControls.destroy();
+    this.createMobileControls();
+  }
+};
+
+  private createMobileControls() {
+  const icons: Record<string, string> = { warrior: "🛡", assassin: "➤", mage: "✦" };
+
+  this.mobileControls = new MobileControls(this, {
+    abilityIcon: icons[this.selectedClassId] ?? "?",
+    onPause: () => {
+      if (this.scene.isActive("ArenaScene")) {
+        this.scene.pause("ArenaScene");
+        this.scene.launch("PauseScene");
+      }
+    },
+  });
+}
 
     private activateAssassinDash(): void {
     this.createAbilityParticles(
@@ -964,7 +1003,7 @@ private playSfx(key: string, volume = 0.5) {
 }
 
   private projectPosition(x: number, y: number) {
-    const originX = this.scale.width / 2;
+    const originX = this.worldOriginX;
     const originY = 80;
 
     return {
@@ -3210,7 +3249,7 @@ private healPlayer(amount: number) {
   // e fica limitada às bordas do mapa.
   private setupCamera() {
     const halfWidth = (this.arenaSize * this.tileWidth) / 2;
-    const originX = this.scale.width / 2;
+    const originX = this.worldOriginX;
 
     const left = originX - halfWidth - 120;
     const top = 80 - 140; // folga extra no topo por causa do painel do HUD
@@ -3897,17 +3936,21 @@ private endRun(result: "victory" | "defeat") {
   });
 }
 
-  private createHUD() {
-    const width = this.scale.width;
+private drawHudPanel() {
+  if (!this.hudPanel) return;
+  const width = this.scale.width;
+  this.hudPanel.clear();
+  this.hudPanel.fillStyle(0x0b0812, 0.9);
+  this.hudPanel.fillRoundedRect(16, 16, width - 32, 92, 12);
+  this.hudPanel.lineStyle(1, 0x6d28d9, 0.8);
+  this.hudPanel.strokeRoundedRect(16, 16, width - 32, 92, 12);
+}
 
+  private createHUD() {
+    
     // Painel superior
-    const panel = this.add.graphics();
-    panel.fillStyle(0x0b0812, 0.9);
-    panel.fillRoundedRect(16, 16, width - 32, 92, 12);
-    panel.lineStyle(1, 0x6d28d9, 0.8);
-    panel.strokeRoundedRect(16, 16, width - 32, 92, 12);
-    panel.setScrollFactor(0);
-    panel.setDepth(10000);
+    this.hudPanel = this.add.graphics().setScrollFactor(0).setDepth(10000);
+    this.drawHudPanel();
 
     this.hudText = this.add
       .text(30, 25, "", {

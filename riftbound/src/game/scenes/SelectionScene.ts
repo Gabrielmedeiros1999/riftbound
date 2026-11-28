@@ -124,6 +124,14 @@ export class SelectionScene extends Phaser.Scene {
 
   private startButton!: Phaser.GameObjects.Container;
 
+  private viewW = 960;
+  private viewH = 640;
+
+  // Tamanho "virtual" da cena, igual ao da tela quando não há zoom.
+  private get view() {
+    return { width: this.viewW, height: this.viewH };
+  }
+
   constructor() {
     super("SelectionScene");
   }
@@ -146,7 +154,19 @@ export class SelectionScene extends Phaser.Scene {
   }
 
   create() {
-    const { width, height } = this.scale;
+
+        // Esta cena foi desenhada para 640 de altura. Em telas mais baixas
+    // (celular na horizontal) afasta a câmera em vez de cortar o conteúdo.
+    const DESIGN_HEIGHT = 640;
+    const zoom = Math.min(1, this.scale.height / DESIGN_HEIGHT);
+
+    this.viewW = this.scale.width / zoom;
+    this.viewH = this.scale.height / zoom;
+
+    this.cameras.main.setZoom(zoom);
+    this.cameras.main.centerOn(this.viewW / 2, this.viewH / 2);
+
+    const { width, height } = this.view;
 
     // A cena pode ser reaberta: zera todo o estado.
     this.accentListeners = [];
@@ -457,7 +477,7 @@ export class SelectionScene extends Phaser.Scene {
   // -------------------------------------------------------------------------
 
   private createBackground() {
-    const { width, height } = this.scale;
+    const { width, height } = this.view;
 
     // Degradê vertical feito em faixas (funciona em WebGL e Canvas).
     const bands = 32;
@@ -527,7 +547,7 @@ export class SelectionScene extends Phaser.Scene {
 
   // Brasas subindo pelo fundo.
   private createEmbers() {
-    const { width, height } = this.scale;
+    const { width, height } = this.view;
 
     for (let i = 0; i < 36; i++) {
       const size = Phaser.Math.Between(2, 4);
@@ -572,7 +592,7 @@ export class SelectionScene extends Phaser.Scene {
   }
 
   private createTitle() {
-    const { width } = this.scale;
+    const { width } = this.view;
 
     this.title = this.add
       .text(width / 2, 46, "ESCOLHA SUA CLASSE", {
@@ -906,7 +926,7 @@ export class SelectionScene extends Phaser.Scene {
 
   // Painel à direita: atributos (barras animadas) e habilidade.
   private createInfoPanel() {
-    const { width } = this.scale;
+    const { width } = this.view;
 
     const panelWidth = 250;
     const panelHeight = 380;
@@ -1051,7 +1071,7 @@ export class SelectionScene extends Phaser.Scene {
   }
 
   private createButtons() {
-    const { width, height } = this.scale;
+    const { width, height } = this.view;
 
     // Botão "INICIAR PARTIDA" com brilho e pulso.
     const glow = this.add.rectangle(0, 0, 320, 64, this.accent, 0.25);

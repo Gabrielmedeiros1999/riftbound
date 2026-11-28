@@ -1,6 +1,19 @@
+
 import { GameCanvas } from "./components/GameCanvas";
 
 function App() {
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
+
+  // No celular, mostra somente o jogo em tela cheia.
+  if (isTouch) {
+    return (
+      <div className="fixed inset-0 overflow-hidden">
+        <GameCanvas />
+      </div>
+    );
+  }
+
+  // No computador, mantém a página completa.
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
       <header className="mx-auto mb-6 max-w-5xl">
@@ -28,9 +41,9 @@ function App() {
             <p className="mt-1 text-sm text-slate-400">
               WASD — movimentar o personagem
               <br />
-              J — ataque básico 
-              <br /> 
-              K — abilidade especial
+              J — ataque básico
+              <br />
+              K — habilidade especial
               <br />
               Espaço — esquiva
               <br />
